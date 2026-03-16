@@ -12,6 +12,7 @@ export interface Profile {
   endpoints: ServerEndpoints;
   appId: string;
   appToken: string;
+  appSecret: string;
   displayName: string;
   domainName?: string;
   email: string;

@@ -73,7 +73,7 @@ async function createProfile() {
     options: [
       {
         value: "cloud",
-        label: "Cloud (app.ethora.com)",
+        label: "Cloud (Ethora hosted)",
         hint: "free account, fastest setup",
       },
       {
@@ -96,11 +96,25 @@ async function createCloudProfile() {
   const endpoints = CLOUD_ENDPOINTS;
   const api = new EthoraAPI(endpoints.apiUrl);
 
+  // Step 0: Bootstrap — get the base app token from the server
+  const spinner = p.spinner();
+  spinner.start("Connecting to server...");
+  try {
+    await api.getBaseAppConfig("ethora");
+    spinner.stop("Connected to Ethora Cloud");
+  } catch (err: any) {
+    spinner.stop("Connection failed");
+    const msg = err?.response?.data?.error || err?.message || "Unknown error";
+    p.log.error(`Could not connect to server: ${msg}`);
+    p.log.info(`API: ${endpoints.apiUrl}`);
+    return;
+  }
+
   const hasAccount = await p.select({
-    message: "Do you have an Ethora Cloud account?",
+    message: "Do you have an account?",
     options: [
-      { value: "login", label: "Yes, I have an account" },
-      { value: "register", label: "No, create one for me" },
+      { value: "login", label: "Yes, log me in" },
+      { value: "register", label: "No, create a new account" },
     ],
   });
   if (p.isCancel(hasAccount)) return handleCancel();
@@ -108,32 +122,30 @@ async function createCloudProfile() {
   let email: string;
 
   if (hasAccount === "register") {
+    // v2 signup: password set immediately, no email confirmation
     const regFields = await p.group({
       email: () =>
         p.text({ message: "Email:", validate: validateEmail }),
       firstName: () => p.text({ message: "First name:" }),
       lastName: () => p.text({ message: "Last name:" }),
+      password: () =>
+        p.password({
+          message: "Password:",
+          validate: (v) =>
+            v.length < 6 ? "Password must be at least 6 characters" : undefined,
+        }),
     });
     if (p.isCancel(regFields)) return handleCancel();
 
-    const spinner = p.spinner();
     spinner.start("Creating account...");
     try {
       await api.register(
         regFields.email,
         regFields.firstName,
-        regFields.lastName
+        regFields.lastName,
+        regFields.password
       );
       spinner.stop("Account created!");
-      p.log.info(
-        `Check ${pc.cyan(regFields.email)} for a verification email, then set your password.`
-      );
-
-      await p.text({
-        message: "Press Enter once you've verified your email and set a password...",
-        defaultValue: "",
-      });
-      email = regFields.email;
     } catch (err: any) {
       const msg =
         err?.response?.data?.error || err?.response?.data?.message || err.message;
@@ -141,30 +153,44 @@ async function createCloudProfile() {
       p.log.error(`Registration error: ${msg}`);
       return;
     }
+
+    // Login immediately after registration
+    spinner.start("Logging in...");
+    try {
+      const loginResult = await api.login(regFields.email, regFields.password);
+      spinner.stop(
+        `Logged in as ${pc.green(loginResult.user.firstName + " " + loginResult.user.lastName)}`
+      );
+    } catch (err: any) {
+      spinner.stop("Login failed");
+      const msg = err?.response?.data?.error || err?.response?.data?.message || err.message;
+      p.log.error(`Login error: ${msg}`);
+      return;
+    }
+
+    email = regFields.email;
   } else {
-    const emailResult = await p.text({
-      message: "Email:",
-      validate: validateEmail,
+    // Existing account — just login
+    const loginFields = await p.group({
+      email: () => p.text({ message: "Email:", validate: validateEmail }),
+      password: () => p.password({ message: "Password:" }),
     });
-    if (p.isCancel(emailResult)) return handleCancel();
-    email = emailResult;
-  }
+    if (p.isCancel(loginFields)) return handleCancel();
 
-  // Login
-  const password = await p.password({ message: "Password:" });
-  if (p.isCancel(password)) return handleCancel();
+    spinner.start("Logging in...");
+    try {
+      const loginResult = await api.login(loginFields.email, loginFields.password);
+      spinner.stop(
+        `Logged in as ${pc.green(loginResult.user.firstName + " " + loginResult.user.lastName)}`
+      );
+    } catch (err: any) {
+      spinner.stop("Login failed");
+      const msg = err?.response?.data?.error || err?.response?.data?.message || err.message;
+      p.log.error(`Login error: ${msg}`);
+      return;
+    }
 
-  const spinner = p.spinner();
-  spinner.start("Logging in...");
-  let loginResult;
-  try {
-    loginResult = await api.login(email, password);
-    spinner.stop(`Logged in as ${pc.green(loginResult.user.firstName + " " + loginResult.user.lastName)}`);
-  } catch (err: any) {
-    spinner.stop("Login failed");
-    const msg = err?.response?.data?.error || err?.response?.data?.message || err.message;
-    p.log.error(`Login error: ${msg}`);
-    return;
+    email = loginFields.email;
   }
 
   // List existing apps or create new
@@ -182,7 +208,7 @@ async function createCloudProfile() {
     const appChoice = await p.select({
       message: "Choose an app or create a new one:",
       options: [
-        ...apps.map((a: any) => ({
+        ...apps.map((a) => ({
           value: a._id,
           label: `${a.displayName} (${a.domainName || a._id})`,
         })),
@@ -194,7 +220,7 @@ async function createCloudProfile() {
     if (appChoice === "__new__") {
       appInfo = await createNewApp(api);
     } else {
-      appInfo = apps.find((a: any) => a._id === appChoice);
+      appInfo = apps.find((a) => a._id === appChoice);
     }
   } else {
     p.log.info("No apps yet. Let's create one.");
@@ -221,6 +247,7 @@ async function createCloudProfile() {
     endpoints,
     appId: appInfo._id,
     appToken: appInfo.appToken || "",
+    appSecret: appInfo.appSecret || "",
     displayName: appInfo.displayName,
     domainName: appInfo.domainName,
     email,
@@ -239,73 +266,282 @@ async function createCloudProfile() {
 }
 
 async function createSelfHostedProfile() {
-  const fields = await p.group({
+  p.log.info("Enter your self-hosted server endpoints.");
+
+  const serverFields = await p.group({
     apiUrl: () =>
       p.text({
-        message: "API endpoint URL:",
-        placeholder: "https://api.myserver.com/v1",
-      }),
-    xmppWebSocket: () =>
-      p.text({
-        message: "XMPP WebSocket URL:",
-        placeholder: "wss://xmpp.myserver.com:5443/ws",
+        message: "API base URL:",
+        placeholder: "https://api.myserver.com",
       }),
     xmppHost: () =>
       p.text({
         message: "XMPP host:",
         placeholder: "xmpp.myserver.com",
       }),
-    xmppConference: () =>
-      p.text({
-        message: "XMPP conference domain:",
-        placeholder: "conference.xmpp.myserver.com",
-      }),
-    appId: () => p.text({ message: "App ID:" }),
-    appToken: () => p.text({ message: "App Token (JWT):" }),
-    email: () => p.text({ message: "Your email (for reference):" }),
-    profileName: () =>
-      p.text({
-        message: "Profile name:",
-        placeholder: "self-hosted-prod",
-      }),
   });
-  if (p.isCancel(fields)) return handleCancel();
+  if (p.isCancel(serverFields)) return handleCancel();
 
-  const endpoints: ServerEndpoints = {
-    apiUrl: fields.apiUrl,
-    xmppWebSocket: fields.xmppWebSocket,
-    xmppHost: fields.xmppHost,
-    xmppConference: fields.xmppConference,
+  // Derive XMPP endpoints from host (user can override)
+  const xmppHost = serverFields.xmppHost;
+  const derivedEndpoints = {
+    xmppWebSocket: `wss://${xmppHost}/ws`,
+    xmppBosh: `https://${xmppHost}/bosh`,
+    xmppConference: `conference.${xmppHost}`,
   };
 
+  p.log.info(pc.dim(`Derived XMPP endpoints (press Enter to accept):`));
+  p.log.info(pc.dim(`  WS:         ${derivedEndpoints.xmppWebSocket}`));
+  p.log.info(pc.dim(`  BOSH:       ${derivedEndpoints.xmppBosh}`));
+  p.log.info(pc.dim(`  Conference: ${derivedEndpoints.xmppConference}`));
+
+  const overrideXmpp = await p.confirm({
+    message: "Accept derived XMPP endpoints?",
+    initialValue: true,
+  });
+  if (p.isCancel(overrideXmpp)) return handleCancel();
+
+  let finalXmppWs = derivedEndpoints.xmppWebSocket;
+  let finalXmppBosh = derivedEndpoints.xmppBosh;
+  let finalXmppConference = derivedEndpoints.xmppConference;
+
+  if (!overrideXmpp) {
+    const xmppOverrides = await p.group({
+      ws: () =>
+        p.text({
+          message: "XMPP WebSocket URL:",
+          defaultValue: derivedEndpoints.xmppWebSocket,
+        }),
+      bosh: () =>
+        p.text({
+          message: "XMPP BOSH URL:",
+          defaultValue: derivedEndpoints.xmppBosh,
+        }),
+      conference: () =>
+        p.text({
+          message: "XMPP conference domain:",
+          defaultValue: derivedEndpoints.xmppConference,
+        }),
+    });
+    if (p.isCancel(xmppOverrides)) return handleCancel();
+    finalXmppWs = xmppOverrides.ws;
+    finalXmppBosh = xmppOverrides.bosh;
+    finalXmppConference = xmppOverrides.conference;
+  }
+
+  const endpoints: ServerEndpoints = {
+    apiUrl: serverFields.apiUrl,
+    xmppWebSocket: finalXmppWs,
+    xmppBosh: finalXmppBosh,
+    xmppHost: xmppHost,
+    xmppConference: finalXmppConference,
+  };
+
+  // Bootstrap — get base app token
+  const api = new EthoraAPI(endpoints.apiUrl);
+  const baseDomain = await p.text({
+    message: "Base app domain name on this server:",
+    placeholder: "ethora",
+    defaultValue: "ethora",
+  });
+  if (p.isCancel(baseDomain)) return handleCancel();
+
+  const spinner = p.spinner();
+  spinner.start("Connecting to server...");
+  try {
+    await api.getBaseAppConfig(baseDomain);
+    spinner.stop("Connected!");
+  } catch (err: any) {
+    spinner.stop("Connection failed");
+    const msg = err?.response?.data?.error || err?.message || "Unknown error";
+    p.log.error(`Could not get base app config: ${msg}`);
+
+    // Fallback: let user provide the app token directly
+    p.log.info("You can enter credentials manually instead.");
+    const manualFields = await p.group({
+      appId: () => p.text({ message: "App ID:" }),
+      appToken: () => p.text({ message: "App Token (JWT):" }),
+      appSecret: () => p.text({ message: "App Secret:" }),
+      email: () => p.text({ message: "Your email (for reference):" }),
+      profileName: () =>
+        p.text({ message: "Profile name:", placeholder: "self-hosted-prod" }),
+    });
+    if (p.isCancel(manualFields)) return handleCancel();
+
+    const profile: Profile = {
+      name: manualFields.profileName,
+      type: "self-hosted",
+      endpoints,
+      appId: manualFields.appId,
+      appToken: manualFields.appToken,
+      appSecret: manualFields.appSecret,
+      displayName: manualFields.profileName,
+      email: manualFields.email,
+    };
+
+    addProfile(profile);
+    p.log.success(`Profile ${pc.green(manualFields.profileName)} saved!`);
+    await askGenerateConfig(profile);
+    return;
+  }
+
+  // Same register/login/create-app flow as cloud
+  const hasAccount = await p.select({
+    message: "Do you have an account on this server?",
+    options: [
+      { value: "login", label: "Yes, log me in" },
+      { value: "register", label: "No, create a new account" },
+    ],
+  });
+  if (p.isCancel(hasAccount)) return handleCancel();
+
+  let email: string;
+
+  if (hasAccount === "register") {
+    const regFields = await p.group({
+      email: () => p.text({ message: "Email:", validate: validateEmail }),
+      firstName: () => p.text({ message: "First name:" }),
+      lastName: () => p.text({ message: "Last name:" }),
+      password: () =>
+        p.password({
+          message: "Password:",
+          validate: (v) =>
+            v.length < 6 ? "Password must be at least 6 characters" : undefined,
+        }),
+    });
+    if (p.isCancel(regFields)) return handleCancel();
+
+    spinner.start("Creating account...");
+    try {
+      await api.register(
+        regFields.email,
+        regFields.firstName,
+        regFields.lastName,
+        regFields.password
+      );
+      spinner.stop("Account created!");
+    } catch (err: any) {
+      const msg = err?.response?.data?.error || err?.response?.data?.message || err.message;
+      spinner.stop("Registration failed");
+      p.log.error(`Error: ${msg}`);
+      return;
+    }
+
+    spinner.start("Logging in...");
+    try {
+      const loginResult = await api.login(regFields.email, regFields.password);
+      spinner.stop(`Logged in as ${pc.green(loginResult.user.firstName + " " + loginResult.user.lastName)}`);
+    } catch (err: any) {
+      spinner.stop("Login failed");
+      const msg = err?.response?.data?.error || err?.response?.data?.message || err.message;
+      p.log.error(`Error: ${msg}`);
+      return;
+    }
+    email = regFields.email;
+  } else {
+    const loginFields = await p.group({
+      email: () => p.text({ message: "Email:", validate: validateEmail }),
+      password: () => p.password({ message: "Password:" }),
+    });
+    if (p.isCancel(loginFields)) return handleCancel();
+
+    spinner.start("Logging in...");
+    try {
+      const loginResult = await api.login(loginFields.email, loginFields.password);
+      spinner.stop(`Logged in as ${pc.green(loginResult.user.firstName + " " + loginResult.user.lastName)}`);
+    } catch (err: any) {
+      spinner.stop("Login failed");
+      const msg = err?.response?.data?.error || err?.response?.data?.message || err.message;
+      p.log.error(`Error: ${msg}`);
+      return;
+    }
+    email = loginFields.email;
+  }
+
+  // List apps or create new
+  spinner.start("Loading your apps...");
+  let apps: AppInfo[] = [];
+  try {
+    apps = await api.listApps();
+    spinner.stop(`Found ${apps.length} app(s)`);
+  } catch {
+    spinner.stop("Could not list apps");
+  }
+
+  let appInfo;
+  if (apps.length > 0) {
+    const appChoice = await p.select({
+      message: "Choose an app or create a new one:",
+      options: [
+        ...apps.map((a) => ({
+          value: a._id,
+          label: `${a.displayName} (${a.domainName || a._id})`,
+        })),
+        { value: "__new__", label: "Create a new app" },
+      ],
+    });
+    if (p.isCancel(appChoice)) return handleCancel();
+
+    if (appChoice === "__new__") {
+      appInfo = await createNewApp(api);
+    } else {
+      appInfo = apps.find((a) => a._id === appChoice);
+    }
+  } else {
+    p.log.info("No apps yet. Let's create one.");
+    appInfo = await createNewApp(api);
+  }
+
+  if (!appInfo) return;
+
+  const profileName = await p.text({
+    message: "Profile name:",
+    defaultValue: `self-hosted-${appInfo.domainName || appInfo.displayName.toLowerCase().replace(/\s+/g, "-")}`,
+    placeholder: "self-hosted-myapp",
+  });
+  if (p.isCancel(profileName)) return handleCancel();
+
   const profile: Profile = {
-    name: fields.profileName,
+    name: profileName,
     type: "self-hosted",
     endpoints,
-    appId: fields.appId,
-    appToken: fields.appToken,
-    displayName: fields.profileName,
-    email: fields.email,
+    appId: appInfo._id,
+    appToken: appInfo.appToken || "",
+    appSecret: appInfo.appSecret || "",
+    displayName: appInfo.displayName,
+    domainName: appInfo.domainName,
+    email,
   };
 
   addProfile(profile);
-  p.log.success(`Profile ${pc.green(fields.profileName)} saved!`);
-
+  p.log.success(`Profile ${pc.green(profileName)} saved!`);
   await askGenerateConfig(profile);
 }
 
 async function createNewApp(api: EthoraAPI) {
-  const appName = await p.text({
-    message: "App display name:",
-    placeholder: "My Chat App",
+  const appFields = await p.group({
+    displayName: () =>
+      p.text({ message: "App display name:", placeholder: "My Chat App" }),
+    domainName: () =>
+      p.text({
+        message: "App domain name (lowercase, no spaces):",
+        placeholder: "mychatapp",
+        validate: (v) => {
+          if (!/^[a-z0-9-]+$/.test(v))
+            return "Only lowercase letters, numbers, and hyphens";
+          return undefined;
+        },
+      }),
   });
-  if (p.isCancel(appName)) return handleCancel();
+  if (p.isCancel(appFields)) return null;
 
   const spinner = p.spinner();
   spinner.start("Creating app...");
   try {
-    const app = await api.createApp(appName);
+    const app = await api.createApp(appFields.displayName, appFields.domainName);
     spinner.stop(`App ${pc.green(app.displayName)} created!`);
+    p.log.info(`App ID: ${pc.cyan(app._id)}`);
+    p.log.info(`Domain: ${pc.cyan(app.domainName)}`);
     return app;
   } catch (err: any) {
     const msg = err?.response?.data?.error || err?.response?.data?.message || err.message;
