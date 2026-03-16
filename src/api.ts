@@ -8,15 +8,42 @@ export interface ServerEndpoints {
   xmppConference: string;
 }
 
-// QA server (latest monoserver version) — used for development.
-// ethora.com (legacy) will be upgraded to this version later.
-export const CLOUD_ENDPOINTS: ServerEndpoints = {
-  apiUrl: "https://api.messenger-dev.asterotoken.com",
-  xmppWebSocket: "wss://xmpp.messenger-dev.asterotoken.com/ws",
-  xmppBosh: "https://xmpp.messenger-dev.asterotoken.com/bosh",
-  xmppHost: "xmpp.messenger-dev.asterotoken.com",
-  xmppConference: "conference.xmpp.messenger-dev.asterotoken.com",
+export interface ServerPreset {
+  label: string;
+  hint: string;
+  endpoints: ServerEndpoints;
+  baseDomain: string;
+}
+
+// Cloud QA — latest monoserver version, recommended for development
+export const CLOUD_QA: ServerPreset = {
+  label: "Cloud QA (latest)",
+  hint: "api.messenger-dev.asterotoken.com — latest server version",
+  endpoints: {
+    apiUrl: "https://api.messenger-dev.asterotoken.com",
+    xmppWebSocket: "wss://xmpp.messenger-dev.asterotoken.com/ws",
+    xmppBosh: "https://xmpp.messenger-dev.asterotoken.com/bosh",
+    xmppHost: "xmpp.messenger-dev.asterotoken.com",
+    xmppConference: "conference.xmpp.messenger-dev.asterotoken.com",
+  },
+  baseDomain: "messenger-dev",
 };
+
+// Cloud Production — ethora.com (legacy version, will be upgraded)
+export const CLOUD_PROD: ServerPreset = {
+  label: "Cloud Production (ethora.com)",
+  hint: "api.ethoradev.com — stable, legacy version",
+  endpoints: {
+    apiUrl: "https://api.ethoradev.com/v1",
+    xmppWebSocket: "wss://xmpp.ethoradev.com:5443/ws",
+    xmppBosh: "https://xmpp.ethoradev.com:5443/bosh",
+    xmppHost: "xmpp.ethoradev.com",
+    xmppConference: "conference.xmpp.ethoradev.com",
+  },
+  baseDomain: "ethora",
+};
+
+export const SERVER_PRESETS: ServerPreset[] = [CLOUD_QA, CLOUD_PROD];
 
 export interface AppInfo {
   _id: string;

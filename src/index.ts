@@ -2,7 +2,7 @@
 
 import * as p from "@clack/prompts";
 import pc from "picocolors";
-import { EthoraAPI, CLOUD_ENDPOINTS, type ServerEndpoints, type AppInfo } from "./api.js";
+import { EthoraAPI, SERVER_PRESETS, type ServerPreset, type ServerEndpoints, type AppInfo } from "./api.js";
 import {
   addProfile,
   loadProfiles,
@@ -68,45 +68,47 @@ async function main() {
 }
 
 async function createProfile() {
-  const serverType = await p.select({
-    message: "Server type:",
+  const serverChoice = await p.select({
+    message: "Server:",
     options: [
-      {
-        value: "cloud",
-        label: "Cloud (Ethora hosted)",
-        hint: "free account, fastest setup",
-      },
+      ...SERVER_PRESETS.map((preset, i) => ({
+        value: String(i),
+        label: preset.label,
+        hint: preset.hint,
+      })),
       {
         value: "self-hosted",
         label: "Self-hosted",
-        hint: "your own server endpoints",
+        hint: "enter your own server endpoints",
       },
     ],
   });
-  if (p.isCancel(serverType)) return handleCancel();
+  if (p.isCancel(serverChoice)) return handleCancel();
 
-  if (serverType === "cloud") {
-    await createCloudProfile();
-  } else {
+  if (serverChoice === "self-hosted") {
     await createSelfHostedProfile();
+  } else {
+    const preset = SERVER_PRESETS[Number(serverChoice)];
+    await createCloudProfile(preset);
   }
 }
 
-async function createCloudProfile() {
-  const endpoints = CLOUD_ENDPOINTS;
+async function createCloudProfile(preset: ServerPreset) {
+  const endpoints = preset.endpoints;
   const api = new EthoraAPI(endpoints.apiUrl);
 
   // Step 0: Bootstrap — get the base app token from the server
   const spinner = p.spinner();
-  spinner.start("Connecting to server...");
+  spinner.start(`Connecting to ${preset.label}...`);
   try {
-    await api.getBaseAppConfig("ethora");
-    spinner.stop("Connected to Ethora Cloud");
+    await api.getBaseAppConfig(preset.baseDomain);
+    spinner.stop(`Connected to ${preset.label}`);
   } catch (err: any) {
     spinner.stop("Connection failed");
     const msg = err?.response?.data?.error || err?.message || "Unknown error";
     p.log.error(`Could not connect to server: ${msg}`);
     p.log.info(`API: ${endpoints.apiUrl}`);
+    p.log.info(`Base domain: ${preset.baseDomain}`);
     return;
   }
 
