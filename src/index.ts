@@ -2,6 +2,8 @@
 
 import * as p from "@clack/prompts";
 import pc from "picocolors";
+import { execSync } from "node:child_process";
+import { existsSync } from "node:fs";
 import { EthoraAPI, SERVER_PRESETS, type ServerPreset, type ServerEndpoints, type AppInfo } from "./api.js";
 import {
   addProfile,
@@ -233,15 +235,16 @@ async function createCloudProfile(preset: ServerPreset) {
 
   // Build profile
   const profileName = await p.text({
-    message: "Profile name:",
-    defaultValue: `cloud-${appInfo.domainName || appInfo.displayName.toLowerCase().replace(/\s+/g, "-")}`,
-    placeholder: "cloud-myapp",
+    message: "Profile name (saves your config locally so you can switch between environments):",
+    defaultValue: `${appInfo.domainName || appInfo.displayName.toLowerCase().replace(/\s+/g, "-")}`,
+    placeholder: "myapp",
   });
   if (p.isCancel(profileName)) return handleCancel();
 
-  const webAppUrl = appInfo.domainName
-    ? `https://${appInfo.domainName}.ethora.com`
-    : undefined;
+  const webAppUrl =
+    appInfo.domainName && preset.webDomain
+      ? `https://${appInfo.domainName}.${preset.webDomain}`
+      : undefined;
 
   const profile: Profile = {
     name: profileName,
@@ -553,6 +556,14 @@ async function createNewApp(api: EthoraAPI) {
   }
 }
 
+const SDK_REPOS: Record<SdkTarget, { repo: string; name: string }> = {
+  android: { repo: "https://github.com/dappros/ethora-sdk-android.git", name: "ethora-sdk-android" },
+  swift: { repo: "https://github.com/dappros/ethora-sdk-swift.git", name: "ethora-sdk-swift" },
+  reactjs: { repo: "https://github.com/dappros/ethora-chat-component.git", name: "ethora-chat-component" },
+  reactnative: { repo: "https://github.com/dappros/ethora-chat-component-rn.git", name: "ethora-chat-component-rn" },
+  wordpress: { repo: "https://github.com/dappros/ethora-wp-plugin.git", name: "ethora-wp-plugin" },
+};
+
 async function askGenerateConfig(profile: Profile) {
   const generate = await p.confirm({
     message: "Generate SDK config files now?",
@@ -562,35 +573,96 @@ async function askGenerateConfig(profile: Profile) {
   const target = await p.select({
     message: "Which SDK?",
     options: [
-      { value: "android", label: "Android (Kotlin/Compose)" },
-      { value: "swift", label: "iOS (Swift)" },
-      { value: "reactjs", label: "React.js (Web)" },
-      { value: "reactnative", label: "React Native" },
-      { value: "wordpress", label: "WordPress" },
+      { value: "android", label: "Android (Kotlin/Compose)", hint: "github.com/dappros/ethora-sdk-android" },
+      { value: "swift", label: "iOS (Swift)", hint: "github.com/dappros/ethora-sdk-swift" },
+      { value: "reactjs", label: "React.js (Web)", hint: "github.com/dappros/ethora-chat-component" },
+      { value: "reactnative", label: "React Native", hint: "github.com/dappros/ethora-chat-component-rn" },
+      { value: "wordpress", label: "WordPress", hint: "github.com/dappros/ethora-wp-plugin" },
     ],
   });
   if (p.isCancel(target)) return;
 
-  // Preview
-  const preview = showConfigPreview(profile, target as SdkTarget);
-  p.log.message(pc.dim("Preview:"));
+  const sdkTarget = target as SdkTarget;
+  const sdkInfo = SDK_REPOS[sdkTarget];
+
+  // Preview config
+  const preview = showConfigPreview(profile, sdkTarget);
+  p.log.message(pc.dim("Config preview:"));
   p.log.message(pc.dim(preview));
 
-  const outputDir = await p.text({
-    message: "Output directory:",
-    defaultValue: ".",
-    placeholder: ".",
+  // Help user get the SDK and choose output directory
+  const outputChoice = await p.select({
+    message: "Where should we write the config files?",
+    options: [
+      {
+        value: "clone",
+        label: `Clone ${sdkInfo.name} and write config into it`,
+        hint: "recommended if you don't have the SDK yet",
+      },
+      {
+        value: "cwd",
+        label: "Current directory (.)",
+        hint: process.cwd(),
+      },
+      {
+        value: "custom",
+        label: "Specify a path",
+        hint: "e.g. path to your existing SDK checkout",
+      },
+    ],
   });
-  if (p.isCancel(outputDir)) return;
+  if (p.isCancel(outputChoice)) return;
+
+  let outputDir: string;
+
+  if (outputChoice === "clone") {
+    const cloneDir = await p.text({
+      message: "Clone into directory:",
+      defaultValue: sdkInfo.name,
+      placeholder: sdkInfo.name,
+    });
+    if (p.isCancel(cloneDir)) return;
+
+    if (existsSync(cloneDir)) {
+      p.log.info(`Directory ${pc.cyan(cloneDir)} already exists, using it.`);
+    } else {
+      const spinner = p.spinner();
+      spinner.start(`Cloning ${sdkInfo.name}...`);
+      try {
+        execSync(`git clone ${sdkInfo.repo} ${cloneDir}`, { stdio: "pipe" });
+        spinner.stop(`Cloned ${pc.green(sdkInfo.name)} into ${pc.cyan(cloneDir)}`);
+      } catch (err: any) {
+        spinner.stop("Clone failed");
+        p.log.error(`Git clone error: ${err.message}`);
+        p.log.info("You can clone manually and re-run with 'Generate config files'.");
+        return;
+      }
+    }
+
+    outputDir = cloneDir;
+  } else if (outputChoice === "cwd") {
+    outputDir = ".";
+  } else {
+    const customPath = await p.text({
+      message: "Output path (absolute or relative):",
+      placeholder: `/path/to/${sdkInfo.name}`,
+    });
+    if (p.isCancel(customPath)) return;
+    outputDir = customPath;
+  }
 
   try {
-    const written = generateConfig(
-      profile,
-      target as SdkTarget,
-      outputDir
-    );
+    const written = generateConfig(profile, sdkTarget, outputDir);
     for (const f of written) {
       p.log.success(`Written: ${pc.cyan(f)}`);
+    }
+    p.log.info(`Config files written to ${pc.cyan(outputDir)}`);
+    if (sdkTarget === "android") {
+      p.log.info(`Next: open ${pc.cyan(outputDir)} in Android Studio and run the sample app.`);
+    } else if (sdkTarget === "swift") {
+      p.log.info(`Next: open ${pc.cyan(outputDir)} in Xcode.`);
+    } else if (sdkTarget === "reactjs" || sdkTarget === "reactnative") {
+      p.log.info(`Next: cd ${pc.cyan(outputDir)} && npm install`);
     }
   } catch (err: any) {
     p.log.error(`Failed to write config: ${err.message}`);

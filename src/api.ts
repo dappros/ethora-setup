@@ -13,6 +13,8 @@ export interface ServerPreset {
   hint: string;
   endpoints: ServerEndpoints;
   baseDomain: string;
+  /** Domain suffix for web app URLs, e.g. "ethora.com" → myapp.ethora.com */
+  webDomain: string | null;
 }
 
 // Cloud QA — latest monoserver version, recommended for development
@@ -27,6 +29,7 @@ export const CLOUD_QA: ServerPreset = {
     xmppConference: "conference.xmpp.messenger-dev.asterotoken.com",
   },
   baseDomain: "messenger-dev",
+  webDomain: "messenger-dev.asterotoken.com",
 };
 
 // Cloud Production — ethora.com (legacy version, will be upgraded)
@@ -41,6 +44,7 @@ export const CLOUD_PROD: ServerPreset = {
     xmppConference: "conference.xmpp.ethoradev.com",
   },
   baseDomain: "ethora",
+  webDomain: "ethora.com",
 };
 
 export const SERVER_PRESETS: ServerPreset[] = [CLOUD_QA, CLOUD_PROD];
