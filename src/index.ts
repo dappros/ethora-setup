@@ -4,6 +4,7 @@ import * as p from "@clack/prompts";
 import pc from "picocolors";
 import { execSync } from "node:child_process";
 import { existsSync } from "node:fs";
+import { join } from "node:path";
 import { EthoraAPI, SERVER_PRESETS, type ServerPreset, type ServerEndpoints, type AppInfo } from "./api.js";
 import {
   addProfile,
@@ -623,8 +624,9 @@ async function askGenerateConfig(profile: Profile) {
     });
     if (p.isCancel(cloneDir)) return;
 
-    if (existsSync(cloneDir)) {
-      p.log.info(`Directory ${pc.cyan(cloneDir)} already exists, using it.`);
+    const isGitRepo = existsSync(join(cloneDir, ".git"));
+    if (isGitRepo) {
+      p.log.info(`Directory ${pc.cyan(cloneDir)} is already a git repo, writing config into it.`);
     } else {
       const spinner = p.spinner();
       spinner.start(`Cloning ${sdkInfo.name}...`);
