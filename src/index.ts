@@ -120,7 +120,7 @@ async function checkAllSdkUpdates(): Promise<void> {
     spinner.start(`Updating ${c.name}...`);
     try {
       // Reset any local modifications (setup tool patches, deleted files, etc.)
-      execSync(`git -C ${JSON.stringify(c.dir)} checkout .`, { stdio: "pipe" });
+      execSync(`git -C ${JSON.stringify(c.dir)} reset --hard HEAD`, { stdio: "pipe" });
       execSync(`git -C ${JSON.stringify(c.dir)} pull --ff-only`, { stdio: "pipe" });
       spinner.stop(`${pc.green(c.name)} updated`);
     } catch {
@@ -852,7 +852,7 @@ async function checkSdkUpdate(dir: string, name: string): Promise<void> {
     pullSpinner.start("Updating...");
     try {
       // Reset any local modifications (setup tool patches, deleted files, etc.)
-      execSync(`git -C ${JSON.stringify(dir)} checkout .`, { stdio: "pipe" });
+      execSync(`git -C ${JSON.stringify(dir)} reset --hard HEAD`, { stdio: "pipe" });
       execSync(`git -C ${JSON.stringify(dir)} pull --ff-only`, {
         stdio: "pipe",
       });
