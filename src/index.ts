@@ -104,10 +104,12 @@ async function checkAllSdkUpdates(): Promise<void> {
     const spinner = p.spinner();
     spinner.start(`Updating ${c.name}...`);
     try {
+      // Reset any local modifications (setup tool patches, deleted files, etc.)
+      execSync(`git -C ${JSON.stringify(c.dir)} checkout .`, { stdio: "pipe" });
       execSync(`git -C ${JSON.stringify(c.dir)} pull --ff-only`, { stdio: "pipe" });
       spinner.stop(`${pc.green(c.name)} updated`);
     } catch {
-      spinner.stop(`${pc.yellow(c.name)}: fast-forward failed — pull manually`);
+      spinner.stop(`${pc.yellow(c.name)}: update failed — pull manually`);
     }
   }
   p.log.message("");
@@ -834,16 +836,16 @@ async function checkSdkUpdate(dir: string, name: string): Promise<void> {
     const pullSpinner = p.spinner();
     pullSpinner.start("Updating...");
     try {
+      // Reset any local modifications (setup tool patches, deleted files, etc.)
+      execSync(`git -C ${JSON.stringify(dir)} checkout .`, { stdio: "pipe" });
       execSync(`git -C ${JSON.stringify(dir)} pull --ff-only`, {
         stdio: "pipe",
       });
       pullSpinner.stop(`${pc.green(name)} updated to latest`);
     } catch {
-      pullSpinner.stop("Fast-forward failed");
+      pullSpinner.stop("Update failed");
       p.log.warn(
-        "You have local changes. Run " +
-          pc.cyan(`git -C ${dir} pull`) +
-          " manually."
+        "Run " + pc.cyan(`git -C ${dir} pull`) + " manually."
       );
     }
   } catch {
