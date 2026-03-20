@@ -44,7 +44,7 @@ async function checkAllSdkUpdates(): Promise<void> {
   };
 
   // Collect update status for all known paths in parallel
-  const checks: { target: string; name: string; dir: string; behind: number }[] = [];
+  const checks: { target: string; name: string; dir: string; behind: number; remoteBranch: string }[] = [];
 
   for (const [target, dir] of Object.entries(paths)) {
     if (!existsSync(join(dir, ".git"))) continue;
@@ -78,7 +78,7 @@ async function checkAllSdkUpdates(): Promise<void> {
           ).trim(),
           10,
         );
-        checks.push({ target, name, dir, behind });
+        checks.push({ target, name, dir, behind, remoteBranch });
       }
     } catch {
       // offline or broken repo — skip silently
@@ -119,9 +119,9 @@ async function checkAllSdkUpdates(): Promise<void> {
     const spinner = p.spinner();
     spinner.start(`Updating ${c.name}...`);
     try {
-      // Reset any local modifications (setup tool patches, deleted files, etc.)
-      execSync(`git -C ${JSON.stringify(c.dir)} reset --hard HEAD`, { stdio: "pipe" });
-      execSync(`git -C ${JSON.stringify(c.dir)} pull --ff-only`, { stdio: "pipe" });
+      // Reset to remote HEAD — handles local modifications, deleted files,
+      // and diverged history (e.g. after force-push)
+      execSync(`git -C ${JSON.stringify(c.dir)} reset --hard ${c.remoteBranch}`, { stdio: "pipe" });
       spinner.stop(`${pc.green(c.name)} updated`);
     } catch {
       spinner.stop(`${pc.yellow(c.name)}: update failed — pull manually`);
@@ -851,9 +851,9 @@ async function checkSdkUpdate(dir: string, name: string): Promise<void> {
     const pullSpinner = p.spinner();
     pullSpinner.start("Updating...");
     try {
-      // Reset any local modifications (setup tool patches, deleted files, etc.)
-      execSync(`git -C ${JSON.stringify(dir)} reset --hard HEAD`, { stdio: "pipe" });
-      execSync(`git -C ${JSON.stringify(dir)} pull --ff-only`, {
+      // Reset to remote HEAD — handles local modifications, deleted files,
+      // and diverged history (e.g. after force-push)
+      execSync(`git -C ${JSON.stringify(dir)} reset --hard ${remoteBranch}`, {
         stdio: "pipe",
       });
       pullSpinner.stop(`${pc.green(name)} updated to latest`);
