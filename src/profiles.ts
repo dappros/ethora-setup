@@ -6,6 +6,12 @@ import type { ServerEndpoints } from "./api.js";
 const CONFIG_DIR = join(homedir(), ".ethora");
 const PROFILES_FILE = join(CONFIG_DIR, "profiles.json");
 
+export interface TestUser {
+  username: string;
+  email: string;
+  password: string;
+}
+
 export interface Profile {
   name: string;
   type: "cloud" | "self-hosted";
@@ -17,6 +23,7 @@ export interface Profile {
   domainName?: string;
   email: string;
   webAppUrl?: string;
+  testUsers?: TestUser[];
 }
 
 export interface ProfileStore {

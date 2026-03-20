@@ -9,10 +9,12 @@ import { EthoraAPI, SERVER_PRESETS, type ServerPreset, type ServerEndpoints, typ
 import {
   addProfile,
   loadProfiles,
+  saveProfiles,
   setActiveProfile,
   getActiveProfile,
   deleteProfile,
   type Profile,
+  type TestUser,
 } from "./profiles.js";
 import {
   generateConfig,
@@ -266,6 +268,9 @@ async function createCloudProfile(preset: ServerPreset) {
   if (webAppUrl) {
     p.log.info(`Web app: ${pc.cyan(webAppUrl)}`);
   }
+
+  // Offer to create test users
+  await askCreateTestUsers(api, profile);
 
   // Ask about config generation
   await askGenerateConfig(profile);
@@ -521,6 +526,10 @@ async function createSelfHostedProfile() {
 
   addProfile(profile);
   p.log.success(`Profile ${pc.green(profileName)} saved!`);
+
+  // Offer to create test users
+  await askCreateTestUsers(api, profile);
+
   await askGenerateConfig(profile);
 }
 
@@ -555,6 +564,111 @@ async function createNewApp(api: EthoraAPI) {
     p.log.error(`Error: ${msg}`);
     return null;
   }
+}
+
+const DEFAULT_TEST_USERS: TestUser[] = [
+  { username: "alice", email: "alice@test.local", password: "TestPass123" },
+  { username: "bob", email: "bob@test.local", password: "TestPass123" },
+];
+
+async function askCreateTestUsers(
+  api: EthoraAPI,
+  profile: Profile
+): Promise<void> {
+  const wantTestUsers = await p.confirm({
+    message: "Create test users (e.g. Alice & Bob) for testing the chat?",
+    initialValue: true,
+  });
+  if (p.isCancel(wantTestUsers) || !wantTestUsers) return;
+
+  // Show defaults and let developer adjust
+  p.log.info(pc.dim("Default test users:"));
+  for (const u of DEFAULT_TEST_USERS) {
+    p.log.info(pc.dim(`  ${u.username}: ${u.email} / ${u.password}`));
+  }
+
+  const customise = await p.confirm({
+    message: "Use these defaults?",
+    initialValue: true,
+  });
+  if (p.isCancel(customise)) return;
+
+  let testUsers: TestUser[];
+
+  if (!customise) {
+    // Let developer edit usernames and password
+    const fields = await p.group({
+      user1Name: () =>
+        p.text({
+          message: "Test user 1 — username:",
+          defaultValue: "alice",
+        }),
+      user1Email: () =>
+        p.text({
+          message: "Test user 1 — email (required by API):",
+          defaultValue: "alice@test.local",
+          validate: validateEmail,
+        }),
+      user2Name: () =>
+        p.text({
+          message: "Test user 2 — username:",
+          defaultValue: "bob",
+        }),
+      user2Email: () =>
+        p.text({
+          message: "Test user 2 — email (required by API):",
+          defaultValue: "bob@test.local",
+          validate: validateEmail,
+        }),
+      password: () =>
+        p.text({
+          message: "Password (shared by test users):",
+          defaultValue: "TestPass123",
+        }),
+    });
+    if (p.isCancel(fields)) return;
+
+    testUsers = [
+      { username: fields.user1Name, email: fields.user1Email, password: fields.password },
+      { username: fields.user2Name, email: fields.user2Email, password: fields.password },
+    ];
+  } else {
+    testUsers = [...DEFAULT_TEST_USERS];
+  }
+
+  // Register test users via API
+  const spinner = p.spinner();
+  const created: TestUser[] = [];
+
+  for (const user of testUsers) {
+    spinner.start(`Creating test user ${pc.cyan(user.username)}...`);
+    try {
+      await api.registerUnderApp(
+        profile.appToken,
+        user.email,
+        user.username,
+        "Test User",
+        user.password
+      );
+      spinner.stop(`Created ${pc.green(user.username)} (${user.email})`);
+      created.push(user);
+    } catch (err: any) {
+      const msg =
+        err?.response?.data?.error ||
+        err?.response?.data?.message ||
+        err.message;
+      spinner.stop(`${user.username}: ${pc.yellow(msg)}`);
+      // Still save the user — they may already exist from a previous run
+      created.push(user);
+    }
+  }
+
+  // Save test users in profile
+  profile.testUsers = created;
+  const store = loadProfiles();
+  store.profiles[profile.name] = profile;
+  saveProfiles(store);
+  p.log.success(`Test users saved to profile ${pc.green(profile.name)}`);
 }
 
 const SDK_REPOS: Record<SdkTarget, { repo: string; name: string }> = {
@@ -658,14 +772,40 @@ async function askGenerateConfig(profile: Profile) {
     for (const f of written) {
       p.log.success(`Written: ${pc.cyan(f)}`);
     }
-    p.log.info(`Config files written to ${pc.cyan(outputDir)}`);
-    if (sdkTarget === "android") {
-      p.log.info(`Next: open ${pc.cyan(outputDir)} in Android Studio and run the sample app.`);
-    } else if (sdkTarget === "swift") {
-      p.log.info(`Next: open ${pc.cyan(outputDir)} in Xcode.`);
-    } else if (sdkTarget === "reactjs" || sdkTarget === "reactnative") {
-      p.log.info(`Next: cd ${pc.cyan(outputDir)} && npm install`);
+
+    // Post-setup summary
+    p.log.message("");
+    p.log.message(pc.bgGreen(pc.black(` Your app "${profile.displayName}" is ready! `)));
+    p.log.message("");
+
+    if (profile.testUsers && profile.testUsers.length > 0) {
+      p.log.message(pc.bold("Test accounts:"));
+      for (const u of profile.testUsers) {
+        p.log.message(`  ${pc.cyan(u.username)}: ${u.email} / ${u.password}`);
+      }
+      p.log.message("");
     }
+
+    p.log.message(pc.bold("Next steps:"));
+    if (sdkTarget === "android") {
+      p.log.message(`  1. Open ${pc.cyan(outputDir)} in Android Studio`);
+      p.log.message(`  2. Run on emulator (API 26+)`);
+      if (profile.testUsers && profile.testUsers.length > 0) {
+        p.log.message(`  3. Log in with ${pc.cyan(profile.testUsers[0].email)} (pre-filled)`);
+        if (profile.testUsers.length > 1) {
+          p.log.message(`  4. Run a second emulator and log in as ${pc.cyan(profile.testUsers[1].email)} to test chat`);
+        }
+      } else {
+        p.log.message(`  3. Create an account in the app to log in`);
+      }
+    } else if (sdkTarget === "swift") {
+      p.log.message(`  1. Open ${pc.cyan(outputDir)} in Xcode`);
+      p.log.message(`  2. Run on simulator`);
+    } else if (sdkTarget === "reactjs" || sdkTarget === "reactnative") {
+      p.log.message(`  1. cd ${pc.cyan(outputDir)} && npm install`);
+      p.log.message(`  2. npm start`);
+    }
+    p.log.message("");
   } catch (err: any) {
     p.log.error(`Failed to write config: ${err.message}`);
   }

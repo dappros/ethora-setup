@@ -1,6 +1,6 @@
 import { readFileSync, writeFileSync, mkdirSync, existsSync } from "node:fs";
 import { join } from "node:path";
-import type { Profile } from "./profiles.js";
+import type { Profile, TestUser } from "./profiles.js";
 
 export type SdkTarget =
   | "android"
@@ -128,14 +128,15 @@ function patchAppConfig(outputDir: string, profile: Profile): string[] {
       `conference = "${e.xmppConference}"`
     );
 
-    // Clear hardcoded test credentials
+    // Replace hardcoded test credentials with test user (or clear if none)
+    const testUser = profile.testUsers?.[0];
     content = content.replace(
       /mutableStateOf\("yukiraze9@gmail\.com"\)/,
-      `mutableStateOf("")`
+      `mutableStateOf("${testUser?.email ?? ""}")`
     );
     content = content.replace(
       /mutableStateOf\("Qwerty123"\)/,
-      `mutableStateOf("")`
+      `mutableStateOf("${testUser?.password ?? ""}")`
     );
 
     writeFileSync(mainActivityFile, content);

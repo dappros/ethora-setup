@@ -148,6 +148,24 @@ export class EthoraAPI {
   }
 
   /**
+   * Register a user under a specific app (using the app's own JWT).
+   * Used for creating test users like Alice and Bob.
+   */
+  async registerUnderApp(
+    appToken: string,
+    email: string,
+    firstName: string,
+    lastName: string,
+    password: string
+  ): Promise<void> {
+    await this.client.post(
+      "/v2/users/sign-up-with-email",
+      { email, firstName, lastName, password },
+      { headers: { Authorization: appToken } }
+    );
+  }
+
+  /**
    * Step 3 (alt): Create a new app.
    * Returns the full app object including appToken and appSecret.
    */
