@@ -868,8 +868,8 @@ async function checkSdkUpdate(dir: string, name: string): Promise<void> {
   }
 }
 
-const SDK_REPOS: Record<SdkTarget, { repo: string; name: string }> = {
-  android: { repo: "https://github.com/dappros/ethora-sdk-android.git", name: "ethora-sdk-android" },
+const SDK_REPOS: Record<SdkTarget, { repo: string; name: string; branch?: string }> = {
+  android: { repo: "https://github.com/dappros/ethora-sample-android.git", name: "ethora-sample-android" },
   swift: { repo: "https://github.com/dappros/ethora-sdk-swift.git", name: "ethora-sdk-swift" },
   reactjs: { repo: "https://github.com/dappros/ethora-chat-component.git", name: "ethora-chat-component" },
   reactnative: { repo: "https://github.com/dappros/ethora-chat-component-rn.git", name: "ethora-chat-component-rn" },
@@ -956,7 +956,8 @@ async function askGenerateConfig(profile: Profile) {
       const spinner = p.spinner();
       spinner.start(`Cloning ${sdkInfo.name}...`);
       try {
-        execSync(`git clone ${sdkInfo.repo} ${cloneDir}`, { stdio: "pipe" });
+        const branchFlag = sdkInfo.branch ? ` -b ${sdkInfo.branch}` : "";
+        execSync(`git clone${branchFlag} ${sdkInfo.repo} ${cloneDir}`, { stdio: "pipe" });
         spinner.stop(`Cloned ${pc.green(sdkInfo.name)} into ${pc.cyan(cloneDir)}`);
       } catch (err: any) {
         spinner.stop("Clone failed");

@@ -50,14 +50,19 @@ function generateEnvFile(profile: Profile): GeneratedFile {
 }
 
 /**
- * Detect if outputDir is a clone of ethora-sdk-android by checking for AppConfig.kt
+ * Detect if outputDir is a clone of ethora-sample-android or ethora-sdk-android.
  */
+const SAMPLE_BUILD_GRADLE = join("app", "build.gradle.kts");
 const APPCONFIG_PATH = join(
   "chat-core", "src", "main", "java", "com", "ethora", "chat", "core", "config", "AppConfig.kt"
 );
 const MAINACTIVITY_PATH = join(
   "chat-app", "src", "main", "java", "com", "ethora", "chat", "app", "MainActivity.kt"
 );
+
+export function isAndroidSample(outputDir: string): boolean {
+  return existsSync(join(outputDir, SAMPLE_BUILD_GRADLE));
+}
 
 export function isAndroidSdk(outputDir: string): boolean {
   return existsSync(join(outputDir, APPCONFIG_PATH));
@@ -67,7 +72,7 @@ export function isAndroidSdk(outputDir: string): boolean {
 export function isSdkProject(outputDir: string, target: SdkTarget): boolean {
   switch (target) {
     case "android":
-      return isAndroidSdk(outputDir);
+      return isAndroidSample(outputDir) || isAndroidSdk(outputDir);
     case "swift":
       return existsSync(join(outputDir, "Package.swift"));
     case "reactjs":
@@ -80,7 +85,37 @@ export function isSdkProject(outputDir: string, target: SdkTarget): boolean {
 }
 
 /**
- * Patch AppConfig.kt in-place with profile values.
+ * Patch ethora-sample-android's app/build.gradle.kts buildConfigFields.
+ */
+function patchSampleApp(outputDir: string, profile: Profile): string[] {
+  const buildFile = join(outputDir, SAMPLE_BUILD_GRADLE);
+  if (!existsSync(buildFile)) return [];
+
+  let content = readFileSync(buildFile, "utf-8");
+  const e = profile.endpoints;
+
+  const fields: Record<string, string> = {
+    ETHORA_APP_ID: profile.appId,
+    ETHORA_APP_TOKEN: profile.appToken,
+    ETHORA_API_BASE_URL: e.apiUrl,
+    ETHORA_XMPP_SERVER_URL: e.xmppWebSocket,
+    ETHORA_XMPP_HOST: e.xmppHost,
+    ETHORA_XMPP_CONFERENCE: e.xmppConference,
+  };
+
+  for (const [key, value] of Object.entries(fields)) {
+    content = content.replace(
+      new RegExp(`(buildConfigField\\("String",\\s*"${key}",\\s*)"[^"]*"`),
+      `$1"${value}"`
+    );
+  }
+
+  writeFileSync(buildFile, content);
+  return [`app/build.gradle.kts (patched ${Object.keys(fields).length} fields)`];
+}
+
+/**
+ * Patch AppConfig.kt in-place with profile values (legacy SDK repo).
  */
 function patchAppConfig(outputDir: string, profile: Profile): string[] {
   const patched: string[] = [];
@@ -242,7 +277,10 @@ export function generateConfig(
   target: SdkTarget,
   outputDir: string
 ): string[] {
-  // Android SDK: patch source files in-place when SDK structure detected
+  // Android: patch sample app's build.gradle.kts or legacy SDK source files
+  if (target === "android" && isAndroidSample(outputDir)) {
+    return patchSampleApp(outputDir, profile);
+  }
   if (target === "android" && isAndroidSdk(outputDir)) {
     return patchAppConfig(outputDir, profile);
   }
