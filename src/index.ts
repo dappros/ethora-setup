@@ -25,8 +25,99 @@ import {
   type SdkTarget,
 } from "./config-generators.js";
 
+/** Check all known SDK paths at startup and offer to update any that are behind. */
+async function checkAllSdkUpdates(): Promise<void> {
+  const store = loadProfiles();
+  const paths = store.sdkPaths;
+  if (!paths || Object.keys(paths).length === 0) return;
+
+  const SDK_LABELS: Record<string, string> = {
+    android: "ethora-sdk-android",
+    swift: "ethora-sdk-swift",
+    reactjs: "ethora-chat-component",
+    reactnative: "ethora-chat-component-rn",
+    wordpress: "ethora-wp-plugin",
+  };
+
+  // Collect update status for all known paths in parallel
+  const checks: { target: string; name: string; dir: string; behind: number }[] = [];
+
+  for (const [target, dir] of Object.entries(paths)) {
+    if (!existsSync(join(dir, ".git"))) continue;
+    const name = SDK_LABELS[target] || target;
+    try {
+      execSync(`git -C ${JSON.stringify(dir)} fetch origin`, {
+        stdio: "pipe",
+        timeout: 10000,
+      });
+      const local = execSync(`git -C ${JSON.stringify(dir)} rev-parse HEAD`, {
+        encoding: "utf-8",
+      }).trim();
+
+      let remoteBranch = "origin/main";
+      try {
+        execSync(`git -C ${JSON.stringify(dir)} rev-parse origin/main`, { stdio: "pipe" });
+      } catch {
+        remoteBranch = "origin/master";
+      }
+
+      const remote = execSync(
+        `git -C ${JSON.stringify(dir)} rev-parse ${remoteBranch}`,
+        { encoding: "utf-8" },
+      ).trim();
+
+      if (local !== remote) {
+        const behind = parseInt(
+          execSync(
+            `git -C ${JSON.stringify(dir)} rev-list --count HEAD..${remoteBranch}`,
+            { encoding: "utf-8" },
+          ).trim(),
+          10,
+        );
+        checks.push({ target, name, dir, behind });
+      }
+    } catch {
+      // offline or broken repo — skip silently
+    }
+  }
+
+  if (checks.length === 0) return;
+
+  p.log.message("");
+  p.log.message(pc.bold("SDK updates available:"));
+  for (const c of checks) {
+    p.log.message(
+      `  ${pc.yellow(c.name)} — ${pc.bold(String(c.behind))} commit(s) behind  ${pc.dim(c.dir)}`
+    );
+  }
+  p.log.message("");
+
+  const update = await p.confirm({
+    message: checks.length === 1
+      ? `Update ${checks[0].name}?`
+      : `Update all ${checks.length} SDKs?`,
+    initialValue: true,
+  });
+  if (p.isCancel(update) || !update) return;
+
+  for (const c of checks) {
+    const spinner = p.spinner();
+    spinner.start(`Updating ${c.name}...`);
+    try {
+      execSync(`git -C ${JSON.stringify(c.dir)} pull --ff-only`, { stdio: "pipe" });
+      spinner.stop(`${pc.green(c.name)} updated`);
+    } catch {
+      spinner.stop(`${pc.yellow(c.name)}: fast-forward failed — pull manually`);
+    }
+  }
+  p.log.message("");
+}
+
 async function main() {
   p.intro(pc.bgCyan(pc.black(" Ethora SDK Setup ")));
+
+  // Check known SDK installations for updates
+  await checkAllSdkUpdates();
 
   const store = loadProfiles();
   const profileNames = Object.keys(store.profiles);
