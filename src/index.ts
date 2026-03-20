@@ -15,6 +15,8 @@ import {
   deleteProfile,
   getSdkPath,
   setSdkPath,
+  getAutoUpdate,
+  setAutoUpdate,
   type Profile,
   type TestUser,
 } from "./profiles.js";
@@ -27,6 +29,8 @@ import {
 
 /** Check all known SDK paths at startup and offer to update any that are behind. */
 async function checkAllSdkUpdates(): Promise<void> {
+  if (!getAutoUpdate()) return;
+
   const store = loadProfiles();
   const paths = store.sdkPaths;
   if (!paths || Object.keys(paths).length === 0) return;
@@ -92,13 +96,24 @@ async function checkAllSdkUpdates(): Promise<void> {
   }
   p.log.message("");
 
-  const update = await p.confirm({
+  const update = await p.select({
     message: checks.length === 1
       ? `Update ${checks[0].name}?`
       : `Update all ${checks.length} SDKs?`,
-    initialValue: true,
+    options: [
+      { value: "yes", label: "Yes, update now" },
+      { value: "skip", label: "Skip for now" },
+      { value: "never", label: "Don't check for updates automatically", hint: "you can re-enable in ~/.ethora/profiles.json" },
+    ],
   });
-  if (p.isCancel(update) || !update) return;
+  if (p.isCancel(update)) return;
+
+  if (update === "never") {
+    setAutoUpdate(false);
+    p.log.info(pc.dim("Auto-update checks disabled. Set \"autoUpdate\": true in ~/.ethora/profiles.json to re-enable."));
+    return;
+  }
+  if (update === "skip") return;
 
   for (const c of checks) {
     const spinner = p.spinner();
@@ -966,7 +981,7 @@ async function askGenerateConfig(profile: Profile) {
   }
 
   // If the SDK already exists, check if it's up to date
-  if (outputChoice !== "clone" && isSdkProject(outputDir, sdkTarget)) {
+  if (outputChoice !== "clone" && isSdkProject(outputDir, sdkTarget) && getAutoUpdate()) {
     await checkSdkUpdate(outputDir, sdkInfo.name);
   }
 

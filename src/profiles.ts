@@ -31,6 +31,8 @@ export interface ProfileStore {
   profiles: Record<string, Profile>;
   /** Last-used output path per SDK target (e.g. { android: "/path/to/sdk" }) */
   sdkPaths?: Record<string, string>;
+  /** Whether to check for SDK updates on startup. Default: true. Set false to disable. */
+  autoUpdate?: boolean;
 }
 
 function ensureConfigDir(): void {
@@ -91,6 +93,17 @@ export function setSdkPath(target: string, path: string): void {
   const store = loadProfiles();
   if (!store.sdkPaths) store.sdkPaths = {};
   store.sdkPaths[target] = path;
+  saveProfiles(store);
+}
+
+export function getAutoUpdate(): boolean {
+  const store = loadProfiles();
+  return store.autoUpdate !== false;
+}
+
+export function setAutoUpdate(enabled: boolean): void {
+  const store = loadProfiles();
+  store.autoUpdate = enabled;
   saveProfiles(store);
 }
 
