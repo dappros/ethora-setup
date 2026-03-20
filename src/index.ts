@@ -13,12 +13,15 @@ import {
   setActiveProfile,
   getActiveProfile,
   deleteProfile,
+  getSdkPath,
+  setSdkPath,
   type Profile,
   type TestUser,
 } from "./profiles.js";
 import {
   generateConfig,
   showConfigPreview,
+  isSdkProject,
   type SdkTarget,
 } from "./config-generators.js";
 
@@ -566,10 +569,21 @@ async function createNewApp(api: EthoraAPI) {
   }
 }
 
-const DEFAULT_TEST_USERS: TestUser[] = [
-  { username: "alice", email: "alice@test.local", password: "TestPass123" },
-  { username: "bob", email: "bob@test.local", password: "TestPass123" },
-];
+function defaultTestUsers(profile: Profile): TestUser[] {
+  // Extract top-level domain from API URL, e.g. api.messenger-dev.asterotoken.com → asterotoken.com
+  let domain = "ethora.com";
+  try {
+    const host = new URL(profile.endpoints.apiUrl).hostname;
+    const parts = host.split(".");
+    if (parts.length >= 2) {
+      domain = parts.slice(-2).join(".");
+    }
+  } catch { /* fall back to ethora.com */ }
+  return [
+    { username: "alice", email: `alice@${domain}`, password: "TestPass123" },
+    { username: "bob", email: `bob@${domain}`, password: "TestPass123" },
+  ];
+}
 
 async function askCreateTestUsers(
   api: EthoraAPI,
@@ -581,9 +595,11 @@ async function askCreateTestUsers(
   });
   if (p.isCancel(wantTestUsers) || !wantTestUsers) return;
 
+  const defaults = defaultTestUsers(profile);
+
   // Show defaults and let developer adjust
   p.log.info(pc.dim("Default test users:"));
-  for (const u of DEFAULT_TEST_USERS) {
+  for (const u of defaults) {
     p.log.info(pc.dim(`  ${u.username}: ${u.email} / ${u.password}`));
   }
 
@@ -606,7 +622,7 @@ async function askCreateTestUsers(
       user1Email: () =>
         p.text({
           message: "Test user 1 — email (required by API):",
-          defaultValue: "alice@test.local",
+          defaultValue: defaults[0].email,
           validate: validateEmail,
         }),
       user2Name: () =>
@@ -617,7 +633,7 @@ async function askCreateTestUsers(
       user2Email: () =>
         p.text({
           message: "Test user 2 — email (required by API):",
-          defaultValue: "bob@test.local",
+          defaultValue: defaults[1].email,
           validate: validateEmail,
         }),
       password: () =>
@@ -633,7 +649,7 @@ async function askCreateTestUsers(
       { username: fields.user2Name, email: fields.user2Email, password: fields.password },
     ];
   } else {
-    testUsers = [...DEFAULT_TEST_USERS];
+    testUsers = [...defaults];
   }
 
   // Register test users via API
@@ -706,25 +722,34 @@ async function askGenerateConfig(profile: Profile) {
   p.log.message(pc.dim(preview));
 
   // Help user get the SDK and choose output directory
+  const lastPath = getSdkPath(sdkTarget);
+  const outputOptions = [
+    {
+      value: "clone",
+      label: `Clone ${sdkInfo.name} and write config into it`,
+      hint: "recommended if you don't have the SDK yet",
+    },
+    ...(lastPath
+      ? [{
+          value: "last",
+          label: `Previous path: ${lastPath}`,
+          hint: "used last time for this SDK",
+        }]
+      : []),
+    {
+      value: "cwd",
+      label: "Current directory (.)",
+      hint: process.cwd(),
+    },
+    {
+      value: "custom",
+      label: "Specify a path",
+      hint: "e.g. path to your existing SDK checkout",
+    },
+  ];
   const outputChoice = await p.select({
     message: "Where should we write the config files?",
-    options: [
-      {
-        value: "clone",
-        label: `Clone ${sdkInfo.name} and write config into it`,
-        hint: "recommended if you don't have the SDK yet",
-      },
-      {
-        value: "cwd",
-        label: "Current directory (.)",
-        hint: process.cwd(),
-      },
-      {
-        value: "custom",
-        label: "Specify a path",
-        hint: "e.g. path to your existing SDK checkout",
-      },
-    ],
+    options: outputOptions,
   });
   if (p.isCancel(outputChoice)) return;
 
@@ -738,10 +763,15 @@ async function askGenerateConfig(profile: Profile) {
     });
     if (p.isCancel(cloneDir)) return;
 
-    const isGitRepo = existsSync(join(cloneDir, ".git"));
-    if (isGitRepo) {
-      p.log.info(`Directory ${pc.cyan(cloneDir)} is already a git repo, writing config into it.`);
+    // Check if dir already has the right SDK project
+    if (isSdkProject(cloneDir, sdkTarget)) {
+      p.log.info(`Directory ${pc.cyan(cloneDir)} already contains ${sdkInfo.name}, writing config into it.`);
     } else {
+      // Remove leftover .git dir if present (empty repo / cleared directory)
+      if (existsSync(join(cloneDir, ".git"))) {
+        p.log.info(`Directory ${pc.cyan(cloneDir)} has .git but no project files — re-cloning.`);
+        execSync(`rm -rf ${JSON.stringify(cloneDir)}`, { stdio: "pipe" });
+      }
       const spinner = p.spinner();
       spinner.start(`Cloning ${sdkInfo.name}...`);
       try {
@@ -756,15 +786,43 @@ async function askGenerateConfig(profile: Profile) {
     }
 
     outputDir = cloneDir;
+  } else if (outputChoice === "last") {
+    outputDir = lastPath!;
   } else if (outputChoice === "cwd") {
     outputDir = ".";
   } else {
     const customPath = await p.text({
       message: "Output path (absolute or relative):",
-      placeholder: `/path/to/${sdkInfo.name}`,
+      placeholder: lastPath || `/path/to/${sdkInfo.name}`,
     });
     if (p.isCancel(customPath)) return;
     outputDir = customPath;
+  }
+
+  // If the target dir doesn't look like the right SDK project, offer to clone into it
+  if (outputChoice !== "clone" && !isSdkProject(outputDir, sdkTarget)) {
+    const shouldClone = await p.confirm({
+      message: `No ${sdkInfo.name} found at ${pc.cyan(outputDir)}. Clone it there?`,
+      initialValue: true,
+    });
+    if (p.isCancel(shouldClone)) return;
+
+    if (shouldClone) {
+      // Remove leftover .git / hidden files if present (empty dir)
+      if (existsSync(join(outputDir, ".git")) && !isSdkProject(outputDir, sdkTarget)) {
+        execSync(`rm -rf ${JSON.stringify(outputDir)}`, { stdio: "pipe" });
+      }
+      const spinner = p.spinner();
+      spinner.start(`Cloning ${sdkInfo.name}...`);
+      try {
+        execSync(`git clone ${sdkInfo.repo} ${outputDir}`, { stdio: "pipe" });
+        spinner.stop(`Cloned ${pc.green(sdkInfo.name)} into ${pc.cyan(outputDir)}`);
+      } catch (err: any) {
+        spinner.stop("Clone failed");
+        p.log.error(`Git clone error: ${err.message}`);
+        return;
+      }
+    }
   }
 
   try {
@@ -772,6 +830,10 @@ async function askGenerateConfig(profile: Profile) {
     for (const f of written) {
       p.log.success(`Written: ${pc.cyan(f)}`);
     }
+
+    // Remember this path for next time
+    const { resolve } = await import("node:path");
+    setSdkPath(sdkTarget, resolve(outputDir));
 
     // Post-setup summary
     p.log.message("");

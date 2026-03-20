@@ -29,6 +29,8 @@ export interface Profile {
 export interface ProfileStore {
   activeProfile: string | null;
   profiles: Record<string, Profile>;
+  /** Last-used output path per SDK target (e.g. { android: "/path/to/sdk" }) */
+  sdkPaths?: Record<string, string>;
 }
 
 function ensureConfigDir(): void {
@@ -78,6 +80,18 @@ export function getActiveProfile(): Profile | null {
 export function listProfileNames(): string[] {
   const store = loadProfiles();
   return Object.keys(store.profiles);
+}
+
+export function getSdkPath(target: string): string | undefined {
+  const store = loadProfiles();
+  return store.sdkPaths?.[target];
+}
+
+export function setSdkPath(target: string, path: string): void {
+  const store = loadProfiles();
+  if (!store.sdkPaths) store.sdkPaths = {};
+  store.sdkPaths[target] = path;
+  saveProfiles(store);
 }
 
 export function deleteProfile(name: string): void {

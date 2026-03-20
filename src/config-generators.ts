@@ -32,6 +32,16 @@ function generateEnvFile(profile: Profile): GeneratedFile {
     `ETHORA_XMPP_CONFERENCE=${profile.endpoints.xmppConference}`,
     profile.webAppUrl ? `ETHORA_WEB_APP_URL=${profile.webAppUrl}` : "",
     ``,
+    ...(profile.testUsers && profile.testUsers.length > 0
+      ? [
+          `# Test users (created by @ethora/setup)`,
+          ...profile.testUsers.map(
+            (u, i) =>
+              `ETHORA_TEST_USER_${i + 1}_EMAIL=${u.email}\nETHORA_TEST_USER_${i + 1}_PASSWORD=${u.password}`
+          ),
+          ``,
+        ]
+      : []),
   ]
     .filter(Boolean)
     .join("\n");
@@ -49,8 +59,24 @@ const MAINACTIVITY_PATH = join(
   "chat-app", "src", "main", "java", "com", "ethora", "chat", "app", "MainActivity.kt"
 );
 
-function isAndroidSdk(outputDir: string): boolean {
+export function isAndroidSdk(outputDir: string): boolean {
   return existsSync(join(outputDir, APPCONFIG_PATH));
+}
+
+/** Detect SDK project by target type */
+export function isSdkProject(outputDir: string, target: SdkTarget): boolean {
+  switch (target) {
+    case "android":
+      return isAndroidSdk(outputDir);
+    case "swift":
+      return existsSync(join(outputDir, "Package.swift"));
+    case "reactjs":
+      return existsSync(join(outputDir, "package.json")) && existsSync(join(outputDir, "config.ts"));
+    case "reactnative":
+      return existsSync(join(outputDir, "package.json")) && existsSync(join(outputDir, "app.json"));
+    case "wordpress":
+      return existsSync(join(outputDir, "ethora-assistant-plugin.php"));
+  }
 }
 
 /**
@@ -168,6 +194,16 @@ function generateSwiftConfig(profile: Profile): GeneratedFile {
     `    static let xmppBosh = "${profile.endpoints.xmppBosh}"`,
     `    static let xmppHost = "${profile.endpoints.xmppHost}"`,
     `    static let xmppConference = "${profile.endpoints.xmppConference}"`,
+    ...(profile.testUsers && profile.testUsers.length > 0
+      ? [
+          ``,
+          `    // Test users (created by @ethora/setup)`,
+          ...profile.testUsers.map(
+            (u, i) =>
+              `    static let testUser${i + 1}Email = "${u.email}"\n    static let testUser${i + 1}Password = "${u.password}"`
+          ),
+        ]
+      : []),
     `}`,
     ``,
   ].join("\n");
