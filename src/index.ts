@@ -687,6 +687,79 @@ async function askCreateTestUsers(
   p.log.success(`Test users saved to profile ${pc.green(profile.name)}`);
 }
 
+/**
+ * Check if a local SDK clone is behind its remote and offer to update.
+ */
+async function checkSdkUpdate(dir: string, name: string): Promise<void> {
+  if (!existsSync(join(dir, ".git"))) return;
+
+  const spinner = p.spinner();
+  spinner.start("Checking for SDK updates...");
+  try {
+    execSync(`git -C ${JSON.stringify(dir)} fetch origin`, {
+      stdio: "pipe",
+      timeout: 15000,
+    });
+
+    const local = execSync(`git -C ${JSON.stringify(dir)} rev-parse HEAD`, {
+      encoding: "utf-8",
+    }).trim();
+
+    // Detect default branch (main or master)
+    let remoteBranch = "origin/main";
+    try {
+      execSync(`git -C ${JSON.stringify(dir)} rev-parse origin/main`, {
+        stdio: "pipe",
+      });
+    } catch {
+      remoteBranch = "origin/master";
+    }
+
+    const remote = execSync(
+      `git -C ${JSON.stringify(dir)} rev-parse ${remoteBranch}`,
+      { encoding: "utf-8" }
+    ).trim();
+
+    if (local === remote) {
+      spinner.stop(`${pc.green(name)} is up to date`);
+      return;
+    }
+
+    const behind = execSync(
+      `git -C ${JSON.stringify(dir)} rev-list --count HEAD..${remoteBranch}`,
+      { encoding: "utf-8" }
+    ).trim();
+
+    spinner.stop(
+      `${pc.yellow(name)} is ${pc.bold(behind)} commit(s) behind remote`
+    );
+
+    const update = await p.confirm({
+      message: `Update ${name} to latest version?`,
+      initialValue: true,
+    });
+    if (p.isCancel(update) || !update) return;
+
+    const pullSpinner = p.spinner();
+    pullSpinner.start("Updating...");
+    try {
+      execSync(`git -C ${JSON.stringify(dir)} pull --ff-only`, {
+        stdio: "pipe",
+      });
+      pullSpinner.stop(`${pc.green(name)} updated to latest`);
+    } catch {
+      pullSpinner.stop("Fast-forward failed");
+      p.log.warn(
+        "You have local changes. Run " +
+          pc.cyan(`git -C ${dir} pull`) +
+          " manually."
+      );
+    }
+  } catch {
+    spinner.stop(pc.dim("Could not check for updates (offline?)"));
+  }
+}
+
 const SDK_REPOS: Record<SdkTarget, { repo: string; name: string }> = {
   android: { repo: "https://github.com/dappros/ethora-sdk-android.git", name: "ethora-sdk-android" },
   swift: { repo: "https://github.com/dappros/ethora-sdk-swift.git", name: "ethora-sdk-swift" },
@@ -797,6 +870,11 @@ async function askGenerateConfig(profile: Profile) {
     });
     if (p.isCancel(customPath)) return;
     outputDir = customPath;
+  }
+
+  // If the SDK already exists, check if it's up to date
+  if (outputChoice !== "clone" && isSdkProject(outputDir, sdkTarget)) {
+    await checkSdkUpdate(outputDir, sdkInfo.name);
   }
 
   // If the target dir doesn't look like the right SDK project, offer to clone into it
