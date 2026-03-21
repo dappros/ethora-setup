@@ -1,0 +1,104 @@
+name: Monthly release
+
+on:
+  schedule:
+    # 1st of each month at 09:00 UTC
+    - cron: '0 9 1 * *'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Check for commits in the previous month
+        id: check
+        shell: bash
+        run: |
+          # YY.MM tag for the current month (the release we're creating)
+          TAG="$(date -u +'%y.%m')"
+          echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
+
+          # First day of previous month → first day of current month
+          SINCE="$(date -u -d '1 month ago' +'%Y-%m-01')"
+          UNTIL="$(date -u +'%Y-%m-01')"
+
+          COUNT="$(git rev-list --count --since="${SINCE}" --until="${UNTIL}" HEAD)"
+          echo "commit_count=${COUNT}" >> "$GITHUB_OUTPUT"
+          echo "Commits in previous month (${SINCE} to ${UNTIL}): ${COUNT}"
+
+          if [ "${COUNT}" -eq 0 ]; then
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          fi
+
+          # Check if tag already exists
+          if git rev-parse "v${TAG}" >/dev/null 2>&1; then
+            echo "Tag v${TAG} already exists, skipping."
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Generate release notes
+        if: steps.check.outputs.skip == 'false'
+        id: notes
+        shell: bash
+        run: |
+          SINCE="$(date -u -d '1 month ago' +'%Y-%m-01')"
+          UNTIL="$(date -u +'%Y-%m-01')"
+          PREV_MONTH="$(date -u -d '1 month ago' +'%B %Y')"
+
+          {
+            echo "body<<RELEASE_EOF"
+            echo "## What's new in ${PREV_MONTH}"
+            echo ""
+            echo "${{ steps.check.outputs.commit_count }} commits since last release:"
+            echo ""
+            git log --since="${SINCE}" --until="${UNTIL}" --format="- %s ([%h](https://github.com/${{ github.repository }}/commit/%H))" HEAD
+            echo ""
+            echo "**Full changelog**: https://github.com/${{ github.repository }}/compare/...v${{ steps.check.outputs.tag }}"
+            echo "RELEASE_EOF"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Update package.json version
+        if: steps.check.outputs.skip == 'false'
+        shell: bash
+        run: |
+          TAG="${{ steps.check.outputs.tag }}"
+          # Update version in package.json and package-lock.json
+          sed -i "s/\"version\": \"[^\"]*\"/\"version\": \"${TAG}\"/" package.json
+          sed -i "0,/\"version\": \"[^\"]*\"/s//\"version\": \"${TAG}\"/" package-lock.json
+          sed -i "0,/\"version\": \"[^\"]*\"/s//\"version\": \"${TAG}\"/" package-lock.json
+
+      - name: Create tag and release
+        if: steps.check.outputs.skip == 'false'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          TAG="v${{ steps.check.outputs.tag }}"
+
+          # Commit version bump
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add package.json package-lock.json
+          git commit -m "chore: bump version to ${{ steps.check.outputs.tag }}" || true
+          git push origin HEAD:main
+
+          # Create tag and release
+          git tag "${TAG}"
+          git push origin "${TAG}"
+
+          gh release create "${TAG}" \
+            --title "v${{ steps.check.outputs.tag }}" \
+            --notes "${{ steps.notes.outputs.body }}"
+
+          echo "Created release ${TAG}"
