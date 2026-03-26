@@ -272,6 +272,32 @@ function generateWordPressConfig(profile: Profile): GeneratedFile {
   };
 }
 
+/**
+ * Patch the React.js SDK's config.ts with profile values.
+ */
+function patchReactConfig(outputDir: string, profile: Profile): string[] {
+  const configFile = join(outputDir, "config.ts");
+  if (!existsSync(configFile)) return [];
+
+  const e = profile.endpoints;
+  // Extract XMPP base domain from host (e.g. "xmpp.messenger-dev.asterotoken.com")
+  const xmppBaseDomain = e.xmppHost;
+
+  const content = [
+    `export const VITE_APP_API_URL = '${e.apiUrl}';`,
+    `export const VITE_APP_DISABLE_STRICT = 'true';`,
+    `export const VITE_APP_DOMAIN_NAME = '${profile.domainName || ""}';`,
+    `export const VITE_APP_XMPP_BASEDOMAIN_OLD = '${xmppBaseDomain}';`,
+    `export const VITE_APP_XMPP_BASEDOMAIN = '${xmppBaseDomain}';`,
+    ``,
+    `export const SERVICE = \`wss://\${VITE_APP_XMPP_BASEDOMAIN_OLD}:5443/ws\`;`,
+    ``,
+  ].join("\n");
+
+  writeFileSync(configFile, content);
+  return ["config.ts (patched with profile endpoints)"];
+}
+
 export function generateConfig(
   profile: Profile,
   target: SdkTarget,
@@ -283,6 +309,11 @@ export function generateConfig(
   }
   if (target === "android" && isAndroidSdk(outputDir)) {
     return patchAppConfig(outputDir, profile);
+  }
+
+  // React.js: patch config.ts if SDK detected
+  if (target === "reactjs" && existsSync(join(outputDir, "config.ts"))) {
+    return patchReactConfig(outputDir, profile);
   }
 
   let files: GeneratedFile[];
@@ -328,6 +359,13 @@ export function showConfigPreview(profile: Profile, target: SdkTarget): string {
         `//   xmppWs    = ${e.xmppWebSocket}`,
         `//   xmppHost  = ${e.xmppHost}`,
         `//   conference = ${e.xmppConference}`,
+      ].join("\n");
+    case "reactjs":
+      return [
+        `// Will patch config.ts with:`,
+        `//   apiUrl     = ${e.apiUrl}`,
+        `//   domainName = ${profile.domainName || ""}`,
+        `//   xmppHost   = ${e.xmppHost}`,
       ].join("\n");
     case "swift":
       return generateSwiftConfig(profile).content;
