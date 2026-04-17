@@ -169,23 +169,31 @@ function patchAppConfig(outputDir: string, profile: Profile): string[] {
   if (existsSync(mainActivityFile)) {
     let content = readFileSync(mainActivityFile, "utf-8");
 
-    // Replace hardcoded baseUrl in login call and ChatConfig
+    // The sample / SDK templates historically shipped with
+    // api.ethoradev.com / xmpp.ethoradev.com defaults, then migrated to
+    // api.chat.ethora.com / xmpp.chat.ethora.com after the prod cluster
+    // moved. The patterns below intentionally accept either (and any
+    // matching JSON-string value) so this patcher keeps working as the
+    // upstream templates are updated and so that already-patched
+    // projects can be re-patched with a different profile.
+
+    // baseUrl: any "https://..." string assigned to baseUrl
     content = content.replace(
-      /baseUrl = "https:\/\/api\.ethoradev\.com\/v1"/g,
+      /baseUrl\s*=\s*"https?:\/\/[^"]+"/g,
       `baseUrl = "${e.apiUrl}"`
     );
 
-    // Replace XMPP settings in ChatConfig
+    // XMPP settings inside ChatConfig blocks
     content = content.replace(
-      /devServer = "wss:\/\/xmpp\.ethoradev\.com:5443\/ws"/g,
+      /devServer\s*=\s*"wss?:\/\/[^"]+"/g,
       `devServer = "${e.xmppWebSocket}"`
     );
     content = content.replace(
-      /host = "xmpp\.ethoradev\.com"/g,
+      /host\s*=\s*"(?:xmpp\.[^"]+|[^"]*ethoradev\.com|[^"]*chat\.ethora\.com)"/g,
       `host = "${e.xmppHost}"`
     );
     content = content.replace(
-      /conference = "conference\.xmpp\.ethoradev\.com"/g,
+      /conference\s*=\s*"conference\.[^"]+"/g,
       `conference = "${e.xmppConference}"`
     );
 
