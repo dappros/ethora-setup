@@ -15,7 +15,7 @@ Interactive CLI to set up Ethora SDK projects. Register an account, create apps,
 | [ethora-sdk-swift](https://github.com/dappros/ethora-sdk-swift) | Native iOS SDK (Swift) |
 | [ethora-wp-plugin](https://github.com/dappros/ethora-wp-plugin) | WordPress plugin |
 | **ethora-setup** | **This repo** — CLI setup tool |
-| [ethora-mcp-server](https://github.com/dappros/ethora-mcp-server) | MCP server for AI/IDE integration |
+| [ethora-mcp-cli](https://github.com/dappros/ethora-mcp-cli) | MCP server for AI/IDE integration (npm: `@ethora/mcp-server`) |
 
 ## Quick Start
 
@@ -44,7 +44,7 @@ ethora-setup
 ```
 $ npx @ethora/setup
 
-◇ Server type: Cloud (app.ethora.com)
+◇ Server type: Cloud (app.chat.ethora.com)
 ◇ Do you have an account? No, create one for me
 ◇ Email: developer@company.com
 ◇ First name: Jane
@@ -54,7 +54,7 @@ $ npx @ethora/setup
 ✔ Logged in as Jane Developer
 ◇ App name: My Chat App
 ✔ App created! ID: 64abc123...
-◇ Web app: https://mychatapp.ethora.com
+◇ Web app: https://mychatapp.chat.ethora.com
 ◇ Profile saved: cloud-mychatapp
 ◇ Generate SDK config files now? Yes
 ◇ Which SDK? Android (Kotlin/Compose)
