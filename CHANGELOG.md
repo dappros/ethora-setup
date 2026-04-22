@@ -4,6 +4,17 @@ All notable changes to this package are documented here. For cross-SDK release n
 
 ---
 
+## [26.04.17] — v26.04
+
+- **Improved:** Server presets switched to canonical `chat.ethora.com` defaults — Cloud Production (`api.chat.ethora.com` / `xmpp.chat.ethora.com`) and Cloud QA (`chat-qa.ethora.com`). Replaces legacy `ethoradev.com` / `messenger-dev.asterotoken.com` clusters ([`5c83f05`](https://github.com/dappros/ethora-setup/commit/5c83f05))
+- **Fixed:** `MainActivity.kt` patcher generalised to accept any `https://...` / `wss://...` / `xmpp.*` / `conference.*` host — previously hard-coded `ethoradev.com` regexes silently no-op'd after upstream Android templates moved to `chat.ethora.com` ([`35d47ef`](https://github.com/dappros/ethora-setup/commit/35d47ef))
+- **Docs:** README updated to reflect new `chat.ethora.com` examples and corrected `ethora-mcp-cli` link ([`5c83f05`](https://github.com/dappros/ethora-setup/commit/5c83f05))
+- **Milestone:** Version bumped to `26.04` ([`ce0e8cc`](https://github.com/dappros/ethora-setup/commit/ce0e8cc))
+
+## [26.03.26]
+
+- **New:** React.js SDK support — when setup detects a React.js SDK clone (has `config.ts`), it patches the file directly with API URL, XMPP host, and domain instead of writing a separate `.env.ethora` ([`a912550`](https://github.com/dappros/ethora-setup/commit/a912550))
+
 ## [26.03.18]
 
 - **New:** `npx @ethora/setup` — full onboarding flow: account registration, app creation, credential generation ([`2c7c89a`](https://github.com/dappros/ethora-setup/commit/2c7c89a))
