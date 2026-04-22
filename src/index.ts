@@ -885,11 +885,50 @@ async function checkSdkUpdate(dir: string, name: string): Promise<void> {
 
 const SDK_REPOS: Record<SdkTarget, { repo: string; name: string; branch?: string }> = {
   android: { repo: "https://github.com/dappros/ethora-sample-android.git", name: "ethora-sample-android" },
-  swift: { repo: "https://github.com/dappros/ethora-sdk-swift.git", name: "ethora-sdk-swift" },
+  swift: { repo: "https://github.com/dappros/ethora-sample-swift.git", name: "ethora-sample-swift" },
   reactjs: { repo: "https://github.com/dappros/ethora-chat-component.git", name: "ethora-chat-component" },
   reactnative: { repo: "https://github.com/dappros/ethora-chat-component-rn.git", name: "ethora-chat-component-rn" },
   wordpress: { repo: "https://github.com/dappros/ethora-wp-plugin.git", name: "ethora-wp-plugin" },
 };
+
+/** URL for the Swift SDK package, needed as a sibling clone next to the sample. */
+const SWIFT_SDK_REPO_URL = "https://github.com/dappros/ethora-sdk-swift.git";
+const SWIFT_SDK_SIBLING_NAME = "ethora-sdk-swift";
+
+/**
+ * When cloning `ethora-sample-swift`, the sample's `project.yml` references
+ * the EthoraSDK Swift package at `path: ../..` — a path that made sense
+ * while SDKPlayground lived inside `ethora-sdk-swift/Examples/`, but no
+ * longer resolves to a `Package.swift` now that the sample is a standalone
+ * repo. Cloning `ethora-sdk-swift` as a sibling (and patching `project.yml`
+ * to `../ethora-sdk-swift`, handled in config-generators.ts) gives the
+ * developer a working XcodeGen-ready layout.
+ */
+async function ensureSwiftSdkSibling(sampleDir: string): Promise<boolean> {
+  const { dirname, resolve, isAbsolute } = await import("node:path");
+  const absSample = isAbsolute(sampleDir) ? sampleDir : resolve(sampleDir);
+  const siblingDir = join(dirname(absSample), SWIFT_SDK_SIBLING_NAME);
+
+  if (existsSync(join(siblingDir, "Package.swift"))) {
+    p.log.info(`Found existing ${pc.cyan(SWIFT_SDK_SIBLING_NAME)} next to the sample.`);
+    return true;
+  }
+
+  const spinner = p.spinner();
+  spinner.start(`Cloning ${SWIFT_SDK_SIBLING_NAME} alongside the sample...`);
+  try {
+    execSync(`git clone ${SWIFT_SDK_REPO_URL} ${JSON.stringify(siblingDir)}`, { stdio: "pipe" });
+    spinner.stop(`${pc.green(SWIFT_SDK_SIBLING_NAME)} cloned at ${pc.cyan(siblingDir)}`);
+    return true;
+  } catch (err: any) {
+    spinner.stop(`Could not clone ${SWIFT_SDK_SIBLING_NAME}`);
+    p.log.warn(
+      `Clone of ${SWIFT_SDK_SIBLING_NAME} failed: ${err?.message || "unknown"}.\n` +
+      `You'll need to clone it manually as a sibling of ${pc.cyan(absSample)} and update project.yml's EthoraSDK path.`
+    );
+    return false;
+  }
+}
 
 async function askGenerateConfig(profile: Profile) {
   const generate = await p.confirm({
@@ -983,6 +1022,13 @@ async function askGenerateConfig(profile: Profile) {
     }
 
     outputDir = cloneDir;
+
+    // Swift sample needs ethora-sdk-swift as a sibling (its project.yml
+    // references the EthoraSDK package via a relative `../..` path that
+    // doesn't resolve in the standalone sample repo).
+    if (sdkTarget === "swift") {
+      await ensureSwiftSdkSibling(cloneDir);
+    }
   } else if (outputChoice === "last") {
     outputDir = lastPath!;
   } else if (outputChoice === "cwd") {
@@ -1024,6 +1070,10 @@ async function askGenerateConfig(profile: Profile) {
         p.log.error(`Git clone error: ${err.message}`);
         return;
       }
+
+      if (sdkTarget === "swift") {
+        await ensureSwiftSdkSibling(outputDir);
+      }
     }
   }
 
@@ -1063,8 +1113,24 @@ async function askGenerateConfig(profile: Profile) {
         p.log.message(`  3. Create an account in the app to log in`);
       }
     } else if (sdkTarget === "swift") {
-      p.log.message(`  1. Open ${pc.cyan(outputDir)} in Xcode`);
-      p.log.message(`  2. Run on simulator`);
+      // ethora-sample-swift is the default Swift target. The SDK-only path
+      // (EthoraConfig.swift standalone) lands in a SPM package root with no
+      // runnable target — handled in the `else` branch.
+      const isSampleClone = existsSync(join(outputDir, "SDKPlayground.xcodeproj"))
+                         || existsSync(join(outputDir, "SDKPlayground"));
+      if (isSampleClone) {
+        p.log.message(`  1. cd ${pc.cyan(outputDir)}`);
+        p.log.message(`  2. Run ${pc.cyan("./generate_xcodeproj.sh")} (needs xcodegen — ${pc.dim("brew install xcodegen")})`);
+        p.log.message(`  3. Run ${pc.cyan("open SDKPlayground.xcodeproj")} and launch the SDKPlayground scheme on a simulator`);
+        if (profile.testUsers && profile.testUsers.length > 0) {
+          p.log.message(`  4. On the Setup tab, form is pre-filled with ${pc.cyan(profile.testUsers[0].email)} — tap Connect`);
+        } else {
+          p.log.message(`  4. On the Setup tab, fill in email / password (or paste a user JWT) — tap Connect`);
+        }
+      } else {
+        p.log.message(`  1. Copy ${pc.cyan("EthoraConfig.swift")} into your Xcode project`);
+        p.log.message(`  2. Reference its constants from your SDK integration code`);
+      }
     } else if (sdkTarget === "reactjs" || sdkTarget === "reactnative") {
       p.log.message(`  1. cd ${pc.cyan(outputDir)} && npm install`);
       p.log.message(`  2. npm start`);

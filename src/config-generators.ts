@@ -57,6 +57,8 @@ const SAMPLE_ENV_FILE = ".env";
 const APPCONFIG_PATH = join(
   "chat-core", "src", "main", "java", "com", "ethora", "chat", "core", "config", "AppConfig.kt"
 );
+const SWIFT_SAMPLE_PROJECT_YML = "project.yml";
+const SWIFT_SAMPLE_SESSION_FILE = join("SDKPlayground", "PlaygroundSession.swift");
 
 export function isAndroidSample(outputDir: string): boolean {
   return existsSync(join(outputDir, SAMPLE_BUILD_GRADLE));
@@ -66,13 +68,24 @@ export function isAndroidSdk(outputDir: string): boolean {
   return existsSync(join(outputDir, APPCONFIG_PATH));
 }
 
+/** ethora-sample-swift (standalone SDKPlayground app, XcodeGen-driven). */
+export function isSwiftSample(outputDir: string): boolean {
+  return existsSync(join(outputDir, SWIFT_SAMPLE_PROJECT_YML))
+      && existsSync(join(outputDir, SWIFT_SAMPLE_SESSION_FILE));
+}
+
+/** ethora-sdk-swift (the SPM package root). */
+export function isSwiftSdk(outputDir: string): boolean {
+  return existsSync(join(outputDir, "Package.swift"));
+}
+
 /** Detect SDK project by target type */
 export function isSdkProject(outputDir: string, target: SdkTarget): boolean {
   switch (target) {
     case "android":
       return isAndroidSample(outputDir) || isAndroidSdk(outputDir);
     case "swift":
-      return existsSync(join(outputDir, "Package.swift"));
+      return isSwiftSample(outputDir) || isSwiftSdk(outputDir);
     case "reactjs":
       return existsSync(join(outputDir, "package.json")) && existsSync(join(outputDir, "config.ts"));
     case "reactnative":
@@ -187,6 +200,86 @@ function patchAppConfig(outputDir: string, profile: Profile): string[] {
   return patched;
 }
 
+/**
+ * Patch `ethora-sample-swift` (SDKPlayground) in-place with profile values.
+ *
+ * Injection strategy:
+ * 1. Rewrite `@Published var <name>: String = "..."` defaults in
+ *    `SDKPlayground/PlaygroundSession.swift` so that on first launch (empty
+ *    `UserDefaults`) the form is pre-populated with the developer's app ID,
+ *    endpoints, app token, and first test user's email / password / JWT.
+ *    On subsequent launches the form loads from `UserDefaults` — if a
+ *    developer already ran the playground once, they can hit "Reset" in the
+ *    app or clear `sdk_playground_form_v1` in the simulator's prefs.
+ * 2. Patch `project.yml`'s EthoraSDK `path: ../..` to a valid location.
+ *    After the 26.04.22 extraction from `ethora-sdk-swift/Examples/`, the
+ *    `../..` path no longer resolves to a `Package.swift`. If the setup
+ *    tool cloned `ethora-sdk-swift` as a sibling directory (see
+ *    `cloneSwiftSdkAlongside` in index.ts), we update the path to
+ *    `../ethora-sdk-swift`. Otherwise we leave the yml untouched and the
+ *    caller reports a warning with manual-fix instructions.
+ */
+function patchSwiftSample(outputDir: string, profile: Profile): string[] {
+  const patched: string[] = [];
+  const e = profile.endpoints;
+  const testUser = profile.testUsers?.[0];
+
+  const sessionFile = join(outputDir, SWIFT_SAMPLE_SESSION_FILE);
+  if (existsSync(sessionFile)) {
+    let content = readFileSync(sessionFile, "utf-8");
+
+    const replacePublishedString = (name: string, value: string) => {
+      const pattern = new RegExp(
+        `(@Published var ${name}: String = )"[^"]*"`
+      );
+      content = content.replace(pattern, `$1"${value}"`);
+    };
+
+    replacePublishedString("baseURLString", e.apiUrl);
+    replacePublishedString("appId", profile.appId);
+    replacePublishedString("appToken", profile.appToken);
+    replacePublishedString("xmppWebSocketURL", e.xmppWebSocket);
+    replacePublishedString("xmppHost", e.xmppHost);
+    replacePublishedString("xmppConference", e.xmppConference);
+
+    if (testUser) {
+      replacePublishedString("email", testUser.email);
+      replacePublishedString("password", testUser.password);
+      if (testUser.jwt) {
+        replacePublishedString("jwtToken", testUser.jwt);
+      }
+    }
+
+    writeFileSync(sessionFile, content);
+    patched.push(
+      testUser
+        ? `SDKPlayground/PlaygroundSession.swift (endpoints + ${testUser.username} credentials${testUser.jwt ? " + JWT" : ""})`
+        : `SDKPlayground/PlaygroundSession.swift (endpoints)`
+    );
+  }
+
+  // If ethora-sdk-swift was cloned as a sibling, point project.yml at it.
+  // `join("..", "ethora-sdk-swift")` — relative from the sample repo root.
+  const siblingSdk = join(outputDir, "..", "ethora-sdk-swift");
+  if (isSwiftSdk(siblingSdk)) {
+    const ymlFile = join(outputDir, SWIFT_SAMPLE_PROJECT_YML);
+    if (existsSync(ymlFile)) {
+      let yml = readFileSync(ymlFile, "utf-8");
+      const before = yml;
+      yml = yml.replace(
+        /^(\s*path:\s*)\.\.\/\.\.\s*$/m,
+        "$1../ethora-sdk-swift"
+      );
+      if (yml !== before) {
+        writeFileSync(ymlFile, yml);
+        patched.push("project.yml (EthoraSDK path → ../ethora-sdk-swift)");
+      }
+    }
+  }
+
+  return patched;
+}
+
 function generateAndroidFallback(profile: Profile): GeneratedFile[] {
   const envFile = generateEnvFile(profile);
   return [
@@ -291,6 +384,12 @@ export function generateConfig(
     return patchAppConfig(outputDir, profile);
   }
 
+  // Swift: patch SDKPlayground (ethora-sample-swift) if detected; otherwise
+  // fall through to the standalone EthoraConfig.swift generator below.
+  if (target === "swift" && isSwiftSample(outputDir)) {
+    return patchSwiftSample(outputDir, profile);
+  }
+
   // React.js: patch config.ts if SDK detected
   if (target === "reactjs" && existsSync(join(outputDir, "config.ts"))) {
     return patchReactConfig(outputDir, profile);
@@ -354,8 +453,23 @@ export function showConfigPreview(profile: Profile, target: SdkTarget): string {
         `//   domainName = ${profile.domainName || ""}`,
         `//   xmppHost   = ${e.xmppHost}`,
       ].join("\n");
-    case "swift":
-      return generateSwiftConfig(profile).content;
+    case "swift": {
+      const testUser = profile.testUsers?.[0];
+      const userLine = testUser
+        ? `//   email / password = ${testUser.email} / ${testUser.password}${testUser.jwt ? "  (+ JWT)" : ""}`
+        : `//   (no test user — developer will fill email/password in the SDKPlayground Setup tab)`;
+      return [
+        `// Swift sample (ethora-sample-swift): will patch SDKPlayground/PlaygroundSession.swift @Published defaults so the Setup tab opens pre-filled with:`,
+        `// Swift SDK only (ethora-sdk-swift): will write a standalone EthoraConfig.swift file instead.`,
+        `//   baseURLString     = ${e.apiUrl}`,
+        `//   appId             = ${profile.appId}`,
+        `//   xmppWebSocketURL  = ${e.xmppWebSocket}`,
+        `//   xmppHost          = ${e.xmppHost}`,
+        `//   xmppConference    = ${e.xmppConference}`,
+        userLine,
+        `// If ethora-sdk-swift is cloned as a sibling, project.yml's EthoraSDK path will also be patched to resolve correctly.`,
+      ].join("\n");
+    }
     case "wordpress":
       return generateWordPressConfig(profile).content;
     default:
