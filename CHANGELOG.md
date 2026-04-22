@@ -4,6 +4,10 @@ All notable changes to this package are documented here. For cross-SDK release n
 
 ---
 
+## [26.04.22]
+
+- **Fixed:** `patchSampleApp()` no longer tries to patch `ETHORA_APP_TOKEN` — that `buildConfigField` was removed from [`ethora-sample-android`](https://github.com/dappros/ethora-sample-android) in the 26.04.21 refresh (the sample uses JWT login + optional single-room mode now). Previously the regex silently no-op'd.
+
 ## [26.04.17] — v26.04
 
 - **Improved:** Server presets switched to canonical `chat.ethora.com` defaults — Cloud Production (`api.chat.ethora.com` / `xmpp.chat.ethora.com`) and Cloud QA (`chat-qa.ethora.com`). Replaces legacy `ethoradev.com` / `messenger-dev.asterotoken.com` clusters ([`5c83f05`](https://github.com/dappros/ethora-setup/commit/5c83f05))

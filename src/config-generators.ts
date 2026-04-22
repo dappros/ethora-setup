@@ -94,9 +94,13 @@ function patchSampleApp(outputDir: string, profile: Profile): string[] {
   let content = readFileSync(buildFile, "utf-8");
   const e = profile.endpoints;
 
+  // ETHORA_APP_TOKEN was removed from the sample's build.gradle.kts in the
+  // 26.04.21 refresh — the sample now uses JWT login (ETHORA_USER_JWT) and
+  // optional single-room mode (ETHORA_ROOM_JID). We intentionally leave the
+  // USER_JWT / ROOM_JID fields at their empty-string default so the sample
+  // falls back to email/password login against the patched endpoints.
   const fields: Record<string, string> = {
     ETHORA_APP_ID: profile.appId,
-    ETHORA_APP_TOKEN: profile.appToken,
     ETHORA_API_BASE_URL: e.apiUrl,
     ETHORA_XMPP_SERVER_URL: e.xmppWebSocket,
     ETHORA_XMPP_HOST: e.xmppHost,
