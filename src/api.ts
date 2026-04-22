@@ -17,6 +17,15 @@ export interface ServerPreset {
   webDomain: string | null;
 }
 
+// The canonical base app on both the chat.ethora.com and chat-qa.ethora.com
+// clusters has `domainName: "app"` (app ID 646cc8dc96d4a4dc8f7b2f2d,
+// isBaseApp=true, isAllowedNewAppCreate=true). Earlier values ("ethora" /
+// "ethora-qa") were inherited from the legacy messenger-dev.asterotoken.com
+// / api.ethoradev.com clusters and didn't get updated when the Apr 17
+// preset-switch commit (5c83f05) moved the endpoints over — so
+// getBaseAppConfig() 404'd and every run bailed before registration.
+const BASE_APP_DOMAIN = "app";
+
 // Cloud QA — pre-production environment for release validation
 export const CLOUD_QA: ServerPreset = {
   label: "Cloud QA (chat-qa.ethora.com)",
@@ -28,7 +37,7 @@ export const CLOUD_QA: ServerPreset = {
     xmppHost: "xmpp.chat-qa.ethora.com",
     xmppConference: "conference.xmpp.chat-qa.ethora.com",
   },
-  baseDomain: "ethora-qa",
+  baseDomain: BASE_APP_DOMAIN,
   webDomain: "chat-qa.ethora.com",
 };
 
@@ -43,7 +52,7 @@ export const CLOUD_PROD: ServerPreset = {
     xmppHost: "xmpp.chat.ethora.com",
     xmppConference: "conference.xmpp.chat.ethora.com",
   },
-  baseDomain: "ethora",
+  baseDomain: BASE_APP_DOMAIN,
   webDomain: "chat.ethora.com",
 };
 
@@ -83,8 +92,16 @@ export class EthoraAPI {
   private userToken: string | null = null;
 
   constructor(baseUrl: string) {
+    // The preset `apiUrl` values end with `/v1` (expected by downstream
+    // consumers: Android build.gradle.kts `.env`, Swift `baseURLString`,
+    // React `config.ts`, etc.) — but inside this client we hit both
+    // `/v1/...` and `/v2/...` endpoints, so we strip the version suffix
+    // from the axios baseURL and let each method include its own prefix.
+    // Without this, axios joins `baseURL=".../v1"` + `url="/v1/apps/..."`
+    // into `.../v1/v1/apps/...` and the server 404s.
     this.baseUrl = baseUrl;
-    this.client = axios.create({ baseURL: baseUrl });
+    const origin = baseUrl.replace(/\/v[12]\/?$/, "");
+    this.client = axios.create({ baseURL: origin });
   }
 
   /**

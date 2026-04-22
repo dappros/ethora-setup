@@ -6,6 +6,9 @@ All notable changes to this package are documented here. For cross-SDK release n
 
 ## [26.04.22]
 
+- **Fixed:** Setup bailed with `404` on "Connecting to Cloud QA/Production…" before any registration could happen. Two bugs stacked:
+  - `EthoraAPI` constructor used `apiUrl` (which ends with `/v1`) as axios `baseURL`, then methods prepended `/v1/...` or `/v2/...` — axios joined them into `…/v1/v1/…` or `…/v1/v2/…`. Fixed by stripping the `/v[12]` suffix in the constructor.
+  - `CLOUD_QA.baseDomain` / `CLOUD_PROD.baseDomain` were stale (`"ethora-qa"` / `"ethora"` — legacy `messenger-dev.asterotoken.com` / `api.ethoradev.com` values that survived the Apr 17 preset switch). The canonical base app on both chat.ethora.com clusters has `domainName: "app"` (app id `646cc8dc96d4a4dc8f7b2f2d`, `isBaseApp=true`). Both presets now use `"app"` via a shared `BASE_APP_DOMAIN` constant.
 - **New:** iOS onboarding now targets [`ethora-sample-swift`](https://github.com/dappros/ethora-sample-swift) (`SDKPlayground`) instead of `ethora-sdk-swift`. When the Swift target is chosen and the sample is cloned, setup also clones `ethora-sdk-swift` as a sibling directory (its `project.yml` references the EthoraSDK package via `path: ../..`, which no longer resolves after the 26.04.22 sample extraction).
 - **New:** `patchSwiftSample()` rewrites nine `@Published var … = "…"` defaults in `SDKPlayground/PlaygroundSession.swift` (baseURL, appId, appToken, XMPP endpoints, plus first test user's email / password / JWT) so the Setup tab opens pre-filled. Also patches `project.yml`'s `path: ../..` → `path: ../ethora-sdk-swift` whenever a sibling SDK clone is present.
 - **New:** `isSwiftSample()` / `isSwiftSdk()` detection helpers — the Swift `isSdkProject()` branch now matches both the sample (`project.yml` + `SDKPlayground/PlaygroundSession.swift`) and the SDK (`Package.swift`). The standalone `EthoraConfig.swift` generator is retained as the fallback for SDK-only clones.
