@@ -10,6 +10,9 @@ export interface TestUser {
   username: string;
   email: string;
   password: string;
+  /** User JWT captured via loginUnderApp after registration. Enables sample apps
+   *  to skip their own auth flow and drop straight into a signed-in session. */
+  jwt?: string;
 }
 
 export interface Profile {

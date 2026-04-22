@@ -166,6 +166,24 @@ export class EthoraAPI {
   }
 
   /**
+   * Login a user under a specific app (using the app's own JWT).
+   * Mirrors registerUnderApp — logging in against the app's scope returns
+   * a JWT signed for that app, suitable for ETHORA_USER_JWT in sample apps.
+   */
+  async loginUnderApp(
+    appToken: string,
+    email: string,
+    password: string
+  ): Promise<LoginResult> {
+    const resp = await this.client.post(
+      "/v2/users/login-with-email",
+      { email, password },
+      { headers: { Authorization: appToken } }
+    );
+    return resp.data;
+  }
+
+  /**
    * Step 3 (alt): Create a new app.
    * Returns the full app object including appToken and appSecret.
    */

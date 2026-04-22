@@ -6,7 +6,11 @@ All notable changes to this package are documented here. For cross-SDK release n
 
 ## [26.04.22]
 
-- **Fixed:** `patchSampleApp()` no longer tries to patch `ETHORA_APP_TOKEN` — that `buildConfigField` was removed from [`ethora-sample-android`](https://github.com/dappros/ethora-sample-android) in the 26.04.21 refresh (the sample uses JWT login + optional single-room mode now). Previously the regex silently no-op'd.
+- **Fixed:** `patchSampleApp()` now writes `.env` at the sample repo root (consumed by `app/build.gradle.kts` via `loadEnvFile()`) instead of regex-patching `buildConfigField` literals. The 26.04.21 sample refresh switched those literals from plain strings to Kotlin string templates (`"\"${envOrDefault(...)}\""`) — the previous `"[^"]*"` regex stopped at the first embedded quote and would corrupt the file.
+- **New:** `ETHORA_USER_JWT` auto-populated with the first test user's JWT. After each test user is registered, setup now calls `loginUnderApp()` on the app's token to capture a user JWT and stores it in the profile (`TestUser.jwt`). Sample apps can drop straight into a signed-in session; if no test user is created or login fails, the field is omitted and the sample falls back to email/password.
+- **API:** New `EthoraAPI.loginUnderApp(appToken, email, password)` method — mirrors `registerUnderApp`, returns an app-scoped `LoginResult`.
+- **Refactored:** Removed dead `MAINACTIVITY_PATH` block from `patchAppConfig()`. The path (`chat-app/.../MainActivity.kt` inside the SDK repo) was emptied when the sample was extracted to [`ethora-sample-android`](https://github.com/dappros/ethora-sample-android) on 26.04.21; the block was a guarded no-op. `patchAppConfig()` now only patches `AppConfig.kt`, which is the only file remaining in that code path.
+- **Note:** `ETHORA_ROOM_JID` is intentionally not auto-populated — single-room mode is opt-in and a freshly-created app has no rooms to pin to. Developers add it manually to `.env` when they want that flow.
 
 ## [26.04.17] — v26.04
 

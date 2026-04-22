@@ -775,16 +775,31 @@ async function askCreateTestUsers(
         user.password
       );
       spinner.stop(`Created ${pc.green(user.username)} (${user.email})`);
-      created.push(user);
     } catch (err: any) {
       const msg =
         err?.response?.data?.error ||
         err?.response?.data?.message ||
         err.message;
       spinner.stop(`${user.username}: ${pc.yellow(msg)}`);
-      // Still save the user — they may already exist from a previous run
-      created.push(user);
+      // Fall through — user may already exist from a previous run; we can
+      // still fetch a JWT for them via loginUnderApp below.
     }
+
+    // Fetch an app-scoped JWT so sample apps can drop straight into a
+    // signed-in session (ETHORA_USER_JWT). Login works for pre-existing
+    // users too, which handles re-runs cleanly.
+    try {
+      const loginResp = await api.loginUnderApp(
+        profile.appToken,
+        user.email,
+        user.password
+      );
+      user.jwt = loginResp.token;
+    } catch {
+      // Leave jwt empty — sample will fall back to email/password login.
+    }
+
+    created.push(user);
   }
 
   // Save test users in profile
