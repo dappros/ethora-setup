@@ -884,7 +884,12 @@ async function checkSdkUpdate(dir: string, name: string): Promise<void> {
 }
 
 const SDK_REPOS: Record<SdkTarget, { repo: string; name: string; branch?: string }> = {
-  android: { repo: "https://github.com/dappros/ethora-sample-android.git", name: "ethora-sample-android" },
+  // tf-dev branch: pairs with the tf-dev branch on ethora-sample-android where
+  // Setup-tab defaults are wired to BuildConfig. Main branch of the sample
+  // still has hard-coded dev-team credentials, so cloning main defeats the
+  // .env injection this setup branch produces. Drop the `branch` field when
+  // tf-dev lands on main upstream.
+  android: { repo: "https://github.com/dappros/ethora-sample-android.git", name: "ethora-sample-android", branch: "tf-dev" },
   swift: { repo: "https://github.com/dappros/ethora-sample-swift.git", name: "ethora-sample-swift" },
   reactjs: { repo: "https://github.com/dappros/ethora-chat-component.git", name: "ethora-chat-component" },
   reactnative: { repo: "https://github.com/dappros/ethora-chat-component-rn.git", name: "ethora-chat-component-rn" },
@@ -1063,7 +1068,8 @@ async function askGenerateConfig(profile: Profile) {
       const spinner = p.spinner();
       spinner.start(`Cloning ${sdkInfo.name}...`);
       try {
-        execSync(`git clone ${sdkInfo.repo} ${outputDir}`, { stdio: "pipe" });
+        const branchFlag = sdkInfo.branch ? ` -b ${sdkInfo.branch}` : "";
+        execSync(`git clone${branchFlag} ${sdkInfo.repo} ${outputDir}`, { stdio: "pipe" });
         spinner.stop(`Cloned ${pc.green(sdkInfo.name)} into ${pc.cyan(outputDir)}`);
       } catch (err: any) {
         spinner.stop("Clone failed");
