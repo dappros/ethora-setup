@@ -130,14 +130,25 @@ function patchSampleApp(outputDir: string, profile: Profile): string[] {
 
   if (testUser) {
     // Email + password are always captured on test-user creation, so the
-    // sample's Setup tab can pre-fill email/password mode. JWT is optional
-    // (populated when loginUnderApp succeeded) and switches the default
-    // auth mode to JWT when non-empty.
+    // sample's Setup tab pre-fills email/password mode. That mode works
+    // today (ethora-sample-android @ tf-dev).
     lines.push(`ETHORA_USER_EMAIL=${testUser.email}`);
     lines.push(`ETHORA_USER_PASSWORD=${testUser.password}`);
-    if (testUser.jwt) {
-      lines.push(`ETHORA_USER_JWT=${testUser.jwt}`);
-    }
+    // ETHORA_USER_JWT is intentionally NOT populated from testUser.jwt.
+    // The Android SDK's JWTLoginConfig / the sample's "JWT" auth mode
+    // targets the "client-flow" JWT — a JWT customers sign against their
+    // Ethora app secret and submit to POST /users/client, verifying the
+    // user via bring-your-own-auth. The token we capture via
+    // EthoraAPI.loginUnderApp() is Ethora's own user-session token from
+    // /v2/users/login-with-email — the server rejects it at /users/client
+    // with `TOKEN_WRONG_TYPE (expected: client, actual: user)`. Leaving
+    // ETHORA_USER_JWT blank makes the sample default to EMAIL_PASSWORD
+    // mode instead of a mode that can't work with this token shape.
+    //
+    // A future enhancement could sign a real client-flow JWT here using
+    // profile.appSecret (HMAC-SHA256 + user claims), which would unlock
+    // automatic JWT-mode login. Out of scope until we confirm the claim
+    // schema against the Ethora backend.
   }
   // ETHORA_ROOM_JID is intentionally not set — single-room mode is opt-in,
   // and a newly-created app has no rooms to pin to. Developers can add it
