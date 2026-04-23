@@ -26,14 +26,21 @@ export interface ServerPreset {
 // getBaseAppConfig() 404'd and every run bailed before registration.
 const BASE_APP_DOMAIN = "app";
 
+// XMPP WebSocket URLs intentionally do NOT include a port. Since the
+// chat.ethora.com migration the XMPP reverse proxy terminates WebSockets
+// on the default wss:// port (443) — the legacy ':5443' path (used on
+// the api.ethoradev.com cluster) times out at TCP connect time on the
+// new infrastructure. Confirmed against chat-qa.ethora.com during
+// tf-dev testing; the same applies to prod per the team.
+//
 // Cloud QA — pre-production environment for release validation
 export const CLOUD_QA: ServerPreset = {
   label: "Cloud QA (chat-qa.ethora.com)",
   hint: "chat-qa.ethora.com — pre-production QA, useful for testing release candidates",
   endpoints: {
     apiUrl: "https://api.chat-qa.ethora.com/v1",
-    xmppWebSocket: "wss://xmpp.chat-qa.ethora.com:5443/ws",
-    xmppBosh: "https://xmpp.chat-qa.ethora.com:5443/bosh",
+    xmppWebSocket: "wss://xmpp.chat-qa.ethora.com/ws",
+    xmppBosh: "https://xmpp.chat-qa.ethora.com/bosh",
     xmppHost: "xmpp.chat-qa.ethora.com",
     xmppConference: "conference.xmpp.chat-qa.ethora.com",
   },
@@ -47,8 +54,8 @@ export const CLOUD_PROD: ServerPreset = {
   hint: "api.chat.ethora.com — canonical production endpoint, recommended default",
   endpoints: {
     apiUrl: "https://api.chat.ethora.com/v1",
-    xmppWebSocket: "wss://xmpp.chat.ethora.com:5443/ws",
-    xmppBosh: "https://xmpp.chat.ethora.com:5443/bosh",
+    xmppWebSocket: "wss://xmpp.chat.ethora.com/ws",
+    xmppBosh: "https://xmpp.chat.ethora.com/bosh",
     xmppHost: "xmpp.chat.ethora.com",
     xmppConference: "conference.xmpp.chat.ethora.com",
   },
