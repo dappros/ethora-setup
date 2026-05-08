@@ -3,8 +3,9 @@
 import * as p from "@clack/prompts";
 import pc from "picocolors";
 import { execSync } from "node:child_process";
-import { existsSync } from "node:fs";
-import { join } from "node:path";
+import { existsSync, readFileSync, readdirSync } from "node:fs";
+import { homedir, platform as osPlatform } from "node:os";
+import { join, resolve as resolvePath } from "node:path";
 import { EthoraAPI, SERVER_PRESETS, type ServerPreset, type ServerEndpoints, type AppInfo } from "./api.js";
 import {
   addProfile,
@@ -906,6 +907,156 @@ const SWIFT_SDK_REPO_URL = "https://github.com/dappros/ethora-sdk-swift.git";
 const SWIFT_SDK_SIBLING_NAME = "ethora-sdk-swift";
 
 /**
+ * Resolve the user's Android SDK location, checking ANDROID_HOME /
+ * ANDROID_SDK_ROOT env vars first, then falling back to the per-OS
+ * default install path. Returns null when nothing is found.
+ */
+function resolveAndroidHome(): string | null {
+  const fromEnv = process.env.ANDROID_HOME || process.env.ANDROID_SDK_ROOT;
+  if (fromEnv && existsSync(fromEnv)) return fromEnv;
+
+  const home = homedir();
+  const candidates: string[] = [];
+  switch (osPlatform()) {
+    case "darwin":
+      candidates.push(join(home, "Library", "Android", "sdk"));
+      break;
+    case "linux":
+      candidates.push(join(home, "Android", "Sdk"));
+      break;
+    case "win32": {
+      const localAppData = process.env.LOCALAPPDATA;
+      if (localAppData) candidates.push(join(localAppData, "Android", "Sdk"));
+      break;
+    }
+  }
+  return candidates.find((c) => existsSync(c)) ?? null;
+}
+
+/**
+ * Read the `compileSdk` value from a cloned ethora-sample-android's
+ * `gradle/libs.versions.toml`. Returns null if the file isn't present
+ * or the value can't be parsed.
+ */
+function readCompileSdkFromSample(sampleDir: string): string | null {
+  const tomlPath = join(sampleDir, "gradle", "libs.versions.toml");
+  if (!existsSync(tomlPath)) return null;
+  try {
+    const toml = readFileSync(tomlPath, "utf-8");
+    const m = toml.match(/^\s*compileSdk\s*=\s*"?(\d+)"?/m);
+    return m ? m[1] : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Detect a known cause of opaque first-build failures: the sample's
+ * `compileSdk` API level isn't installed in the user's Android SDK.
+ * Without it, AGP fails sync with
+ *   "Could not isolate parameters of artifact transform
+ *    D8BackportedMethodsGenerator … no value available"
+ * which is hard to read as "missing platform SDK" — surface a clear
+ * warning before the developer hits Sync in Android Studio.
+ *
+ * Best-effort and non-fatal: missing tooling just skips the check.
+ */
+function checkAndroidPlatformSdkInstalled(sampleDir: string): void {
+  const required = readCompileSdkFromSample(sampleDir);
+  if (!required) return;
+
+  const androidHome = resolveAndroidHome();
+
+  if (!androidHome) {
+    p.log.warn(
+      `Android SDK location not found. Set ${pc.cyan("ANDROID_HOME")} or install Android Studio.`
+    );
+    p.log.message(
+      `  The sample compiles against ${pc.cyan(`platforms;android-${required}`)}; without an Android SDK present`
+    );
+    p.log.message(
+      `  Gradle sync will fail with an opaque ${pc.dim('"D8BackportedMethodsGenerator … no value available"')} error.`
+    );
+    return;
+  }
+
+  const platformDir = join(androidHome, "platforms", `android-${required}`);
+  if (existsSync(platformDir)) return; // happy path
+
+  // Show the developer which platforms ARE installed, so the gap is obvious
+  let installedNote = "";
+  let minorRevisionPresent: string | null = null;
+  try {
+    const platformsDir = join(androidHome, "platforms");
+    if (existsSync(platformsDir)) {
+      const installed = readdirSync(platformsDir)
+        .filter((n) => n.startsWith("android-"))
+        .map((n) => n.replace(/^android-/, ""))
+        .sort((a, b) => {
+          // Numeric versions (incl. minor revisions like "37.0") sorted
+          // highest-first; non-numeric (preview names like
+          // "CinnamonBun") fall to the end alphabetically.
+          const na = Number(a);
+          const nb = Number(b);
+          if (Number.isNaN(na) && Number.isNaN(nb)) return a.localeCompare(b);
+          if (Number.isNaN(na)) return 1;
+          if (Number.isNaN(nb)) return -1;
+          return nb - na;
+        });
+      if (installed.length) {
+        installedNote = ` (installed: ${installed.slice(0, 5).join(", ")}${installed.length > 5 ? "…" : ""})`;
+      }
+      // The exact case Taras hit: cmdline-tools installed
+      // `android-${required}.0` (a minor revision) but Gradle's
+      // `compileSdk = ${required}` resolves to plain `android-${required}`.
+      // Surface this hint explicitly so the developer knows they don't
+      // need a fresh install — just the matching base entry.
+      minorRevisionPresent =
+        installed.find((v) => v.startsWith(`${required}.`)) ?? null;
+    }
+  } catch {
+    /* ignore */
+  }
+
+  p.log.warn(
+    `Android Platform SDK ${pc.bold(required)} is not installed${installedNote}.`
+  );
+  p.log.message(
+    `  The cloned sample's ${pc.cyan("gradle/libs.versions.toml")} pins ${pc.cyan(`compileSdk = "${required}"`)}.`
+  );
+  p.log.message(
+    `  Without ${pc.cyan(`platforms;android-${required}`)} installed, Android Studio's Gradle sync will fail with`
+  );
+  p.log.message(
+    `  the opaque error: ${pc.dim('"Could not isolate parameters of artifact transform D8BackportedMethodsGenerator"')}.`
+  );
+
+  if (minorRevisionPresent) {
+    p.log.message("");
+    p.log.message(
+      `  ${pc.yellow("Note:")} you have ${pc.cyan(`android-${minorRevisionPresent}`)} installed, but Gradle's`
+    );
+    p.log.message(
+      `  ${pc.cyan(`compileSdk = ${required}`)} maps to ${pc.cyan(`android-${required}`)} (the base entry, no minor suffix).`
+    );
+    p.log.message(
+      `  In SDK Manager, tick ${pc.bold("Show Package Details")} to see the base ${pc.cyan(`Android API ${required}`)} entry`
+    );
+    p.log.message(`  separately from minor revisions.`);
+  }
+
+  p.log.message("");
+  p.log.message(pc.bold("  Install before opening in Android Studio:"));
+  p.log.message(
+    `    Android Studio → Tools → SDK Manager → SDK Platforms → tick ${pc.cyan(`API ${required}`)} → Apply`
+  );
+  p.log.message(`  Or via command line:`);
+  p.log.message(
+    `    ${pc.cyan(`sdkmanager "platforms;android-${required}"`)}`
+  );
+}
+
+/**
  * When cloning `ethora-sample-swift`, the sample's `project.yml` references
  * the EthoraSDK Swift package at `path: ../..` — a path that made sense
  * while SDKPlayground lived inside `ethora-sdk-swift/Examples/`, but no
@@ -1095,8 +1246,15 @@ async function askGenerateConfig(profile: Profile) {
     }
 
     // Remember this path for next time
-    const { resolve } = await import("node:path");
-    setSdkPath(sdkTarget, resolve(outputDir));
+    setSdkPath(sdkTarget, resolvePath(outputDir));
+
+    // Pre-flight check for Android: warn loudly if the platform-SDK the
+    // sample compiles against isn't installed locally. Catches the
+    // opaque "D8BackportedMethodsGenerator … no value available" sync
+    // failure before the developer hits it in Android Studio.
+    if (sdkTarget === "android") {
+      checkAndroidPlatformSdkInstalled(resolvePath(outputDir));
+    }
 
     // Post-setup summary
     p.log.message("");
