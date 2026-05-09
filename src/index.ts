@@ -1300,9 +1300,15 @@ async function askGenerateConfig(profile: Profile) {
         p.log.message(`  1. Copy ${pc.cyan("EthoraConfig.swift")} into your Xcode project`);
         p.log.message(`  2. Reference its constants from your SDK integration code`);
       }
-    } else if (sdkTarget === "reactjs" || sdkTarget === "reactnative") {
+    } else if (sdkTarget === "reactjs") {
+      // ethora-chat-component is a Vite project; the dev script is `npm
+      // run dev`, not `npm start` (no `start` lifecycle script exists).
       p.log.message(`  1. cd ${pc.cyan(outputDir)} && npm install`);
-      p.log.message(`  2. npm start`);
+      p.log.message(`  2. npm run dev   ${pc.dim("# starts the Vite dev server")}`);
+    } else if (sdkTarget === "reactnative") {
+      p.log.message(`  1. cd ${pc.cyan(outputDir)} && npm install`);
+      p.log.message(`  2. npm start   ${pc.dim("# starts the Metro bundler")}`);
+      p.log.message(`  3. ${pc.cyan("npx react-native run-ios")} or ${pc.cyan("npx react-native run-android")}`);
     }
     p.log.message("");
   } catch (err: any) {
