@@ -388,6 +388,7 @@ function patchReactConfig(outputDir: string, profile: Profile): string[] {
     `# Consumed by Vite at dev/build time; surfaces through src/config.ts.`,
     `# This file is gitignored — never commit real endpoints / app IDs.`,
     `VITE_APP_ID=${profile.appId}`,
+    `VITE_APP_TOKEN=${profile.appToken}`,
     `VITE_API=${e.apiUrl}`,
     `VITE_DOMAIN_NAME=${profile.domainName || ""}`,
     `VITE_WEB_DOMAIN=${profile.webAppUrl ? profile.webAppUrl.replace(/^https?:\/\//, "").replace(/\/.*$/, "") : ""}`,
@@ -399,7 +400,7 @@ function patchReactConfig(outputDir: string, profile: Profile): string[] {
 
   const envPath = join(outputDir, ".env.local");
   writeFileSync(envPath, lines.join("\n"));
-  return [".env.local (Vite env: VITE_API + VITE_APP_ID + VITE_XMPP_*)"];
+  return [".env.local (Vite env: VITE_API + VITE_APP_ID + VITE_APP_TOKEN + VITE_XMPP_*)"];
 }
 
 export function generateConfig(
@@ -491,6 +492,7 @@ export function showConfigPreview(profile: Profile, target: SdkTarget): string {
       return [
         `// React.js demo (ethora-chat-component): will write .env.local at the repo root, consumed by Vite.`,
         `//   VITE_APP_ID           = ${profile.appId}`,
+        `//   VITE_APP_TOKEN        = ${profile.appToken ? "<app JWT>" : "(empty)"}`,
         `//   VITE_API              = ${e.apiUrl}`,
         `//   VITE_DOMAIN_NAME      = ${profile.domainName || ""}`,
         `//   VITE_WEB_DOMAIN       = ${webDomain}`,
