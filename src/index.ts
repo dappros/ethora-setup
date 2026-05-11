@@ -885,16 +885,9 @@ async function checkSdkUpdate(dir: string, name: string): Promise<void> {
 }
 
 const SDK_REPOS: Record<SdkTarget, { repo: string; name: string; branch?: string }> = {
-  // TEMPORARY: pin to the PR branch that wires the sample's Setup-tab
-  // defaults to BuildConfig (https://github.com/dappros/ethora-sample-android/pull/1).
-  // Without this branch, the .env keys we write here (ETHORA_APP_TOKEN /
-  // USER_EMAIL / USER_PASSWORD) are read but ignored — the sample's
-  // PlaygroundSessionState still hardcodes BASE app ID + dev-team email/
-  // password defaults. Drop the `branch` field once PR #1 lands on main.
   android: {
     repo: "https://github.com/dappros/ethora-sample-android.git",
     name: "ethora-sample-android",
-    branch: "tf/setup-integration-and-ux-fixes",
   },
   swift: { repo: "https://github.com/dappros/ethora-sample-swift.git", name: "ethora-sample-swift" },
   reactjs: { repo: "https://github.com/dappros/ethora-chat-component.git", name: "ethora-chat-component" },
