@@ -388,6 +388,22 @@ async function createCloudProfile(preset: ServerPreset) {
   await askGenerateConfig(profile);
 }
 
+/**
+ * Derive the conventional XMPP host from an API base URL by swapping the
+ * leading `api.` subdomain for `xmpp.`. Returns "" when the input doesn't
+ * follow the `api.<rest>` convention, so callers fall back to no default
+ * instead of suggesting a host the user didn't ask for.
+ */
+function deriveXmppHostFromApiUrl(apiUrl: string): string {
+  try {
+    const host = new URL(apiUrl).hostname;
+    if (host.startsWith("api.")) return "xmpp." + host.slice("api.".length);
+  } catch {
+    // fall through
+  }
+  return "";
+}
+
 async function createSelfHostedProfile() {
   p.log.info("Enter your self-hosted server endpoints.");
 
@@ -397,16 +413,21 @@ async function createSelfHostedProfile() {
         message: "API base URL:",
         placeholder: "https://api.myserver.com",
       }),
-    xmppHost: () =>
-      p.text({
+    xmppHost: ({ results }) => {
+      const derived = deriveXmppHostFromApiUrl(results.apiUrl ?? "");
+      return p.text({
         message: "XMPP host:",
-        placeholder: "xmpp.myserver.com",
-      }),
+        placeholder: derived || "xmpp.myserver.com",
+        defaultValue: derived || undefined,
+      });
+    },
   });
   if (p.isCancel(serverFields)) return handleCancel();
 
   // Derive XMPP endpoints from host (user can override)
-  const xmppHost = serverFields.xmppHost;
+  // Cast: the dependent p.group callback widens this field's inferred type
+  // to `unknown`. isCancel() above already narrows the group result.
+  const xmppHost = serverFields.xmppHost as string;
   const derivedEndpoints = {
     xmppWebSocket: `wss://${xmppHost}/ws`,
     xmppBosh: `https://${xmppHost}/bosh`,
@@ -464,8 +485,8 @@ async function createSelfHostedProfile() {
   const api = new EthoraAPI(endpoints.apiUrl);
   const baseDomain = await p.text({
     message: "Base app domain name on this server:",
-    placeholder: "ethora",
-    defaultValue: "ethora",
+    placeholder: "app",
+    defaultValue: "app",
   });
   if (p.isCancel(baseDomain)) return handleCancel();
 
