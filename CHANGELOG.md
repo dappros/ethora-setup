@@ -4,6 +4,13 @@ All notable changes to this package are documented here. For cross-SDK release n
 
 ---
 
+## [26.5.0]
+
+- **First npm release** — `@ethora/setup` is now published to npm; `npx @ethora/setup` works without a local clone.
+- Set the package version to clean semver `26.5.0` (was `26.05` — an invalid 2-part version npm would silently normalise).
+- Add a `prepublishOnly: npm run build` script so the published tarball always ships a fresh `dist/` (it's gitignored, so it must be built at publish time).
+- README: fix the ecosystem-table link to the renamed `ethora-mcp-server` repo.
+
 ## [26.04.22]
 
 - **Fixed:** Setup bailed with `404` on "Connecting to Cloud QA/Production…" before any registration could happen. Two bugs stacked:

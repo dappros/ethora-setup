@@ -15,7 +15,7 @@ Interactive CLI to set up Ethora SDK projects. Register an account, create apps,
 | [ethora-sdk-swift](https://github.com/dappros/ethora-sdk-swift) | Native iOS SDK (Swift) |
 | [ethora-wp-plugin](https://github.com/dappros/ethora-wp-plugin) | WordPress plugin |
 | **ethora-setup** | **This repo** — CLI setup tool |
-| [ethora-mcp-cli](https://github.com/dappros/ethora-mcp-cli) | MCP server for AI/IDE integration (npm: `@ethora/mcp-server`) |
+| [ethora-mcp-server](https://github.com/dappros/ethora-mcp-server) | MCP server for AI/IDE integration (npm: `@ethora/mcp-server`) |
 
 ## Quick Start
 
