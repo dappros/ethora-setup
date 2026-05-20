@@ -1113,6 +1113,35 @@ async function ensureSwiftSdkSibling(sampleDir: string): Promise<boolean> {
   }
 }
 
+/**
+ * Run `npm install` inside a freshly-cloned JS-based SDK sample so the
+ * developer can go straight to `npm run ios` / `npm run dev` without
+ * a missed step. Output is suppressed (npm install is noisy and clack
+ * draws over single-line spinners); on failure the last few lines of
+ * stderr are surfaced and the function returns false so the caller
+ * can advise running it manually.
+ */
+async function runNpmInstall(outputDir: string): Promise<boolean> {
+  const spinner = p.spinner();
+  spinner.start("Running npm install in the cloned SDK (this can take ~30s)...");
+  try {
+    execSync("npm install", { cwd: outputDir, stdio: "pipe" });
+    spinner.stop(`npm install completed in ${pc.cyan(outputDir)}`);
+    return true;
+  } catch (err: any) {
+    spinner.stop("npm install failed");
+    const lastLines = String(err?.stderr || err?.stdout || err?.message || "")
+      .split("\n")
+      .filter(Boolean)
+      .slice(-5)
+      .join("\n");
+    p.log.warn(
+      `npm install exited non-zero. Run it manually in ${pc.cyan(outputDir)}.\n${lastLines}`
+    );
+    return false;
+  }
+}
+
 async function askGenerateConfig(profile: Profile) {
   const generate = await p.confirm({
     message: "Generate SDK config files now?",
@@ -1270,6 +1299,20 @@ async function askGenerateConfig(profile: Profile) {
     // Remember this path for next time
     setSdkPath(sdkTarget, resolvePath(outputDir));
 
+    // Auto-install JS deps for the JS-based targets. Saves a manual
+    // step and prevents the "expo: command not found" trap when
+    // developers skip `npm install` and go straight to `npm run ios`.
+    // Skipped when `node_modules/` already exists (existing checkout
+    // or repeat run).
+    let npmInstallRan = false;
+    if (
+      (sdkTarget === "reactjs" || sdkTarget === "reactnative") &&
+      existsSync(join(outputDir, "package.json")) &&
+      !existsSync(join(outputDir, "node_modules"))
+    ) {
+      npmInstallRan = await runNpmInstall(outputDir);
+    }
+
     // Pre-flight check for Android: warn loudly if the platform-SDK the
     // sample compiles against isn't installed locally. Catches the
     // opaque "D8BackportedMethodsGenerator … no value available" sync
@@ -1325,11 +1368,21 @@ async function askGenerateConfig(profile: Profile) {
     } else if (sdkTarget === "reactjs") {
       // ethora-chat-component is a Vite project; the dev script is `npm
       // run dev`, not `npm start` (no `start` lifecycle script exists).
-      p.log.message(`  1. cd ${pc.cyan(outputDir)} && npm install`);
-      p.log.message(`  2. npm run dev   ${pc.dim("# starts the Vite dev server")}`);
+      // npm install was auto-run above when node_modules was absent.
+      if (npmInstallRan) {
+        p.log.message(`  1. cd ${pc.cyan(outputDir)}`);
+        p.log.message(`  2. npm run dev   ${pc.dim("# starts the Vite dev server")}`);
+      } else {
+        p.log.message(`  1. cd ${pc.cyan(outputDir)} && npm install`);
+        p.log.message(`  2. npm run dev   ${pc.dim("# starts the Vite dev server")}`);
+      }
     } else if (sdkTarget === "reactnative") {
       const isChatComponentRn = isReactNativeChatComponent(outputDir);
-      p.log.message(`  1. cd ${pc.cyan(outputDir)} && npm install`);
+      // npm install was auto-run above when node_modules was absent.
+      const installStep = npmInstallRan
+        ? `cd ${pc.cyan(outputDir)}`
+        : `cd ${pc.cyan(outputDir)} && npm install`;
+      p.log.message(`  1. ${installStep}`);
       if (isChatComponentRn) {
         p.log.message(`  2. ${pc.cyan("npm run ios")} ${pc.dim("# or  npm run android")}`);
         if (profile.testUsers && profile.testUsers.length > 0) {
