@@ -25,6 +25,7 @@ import {
   generateConfig,
   showConfigPreview,
   isSdkProject,
+  isReactNativeChatComponent,
   type SdkTarget,
 } from "./config-generators.js";
 
@@ -1327,9 +1328,19 @@ async function askGenerateConfig(profile: Profile) {
       p.log.message(`  1. cd ${pc.cyan(outputDir)} && npm install`);
       p.log.message(`  2. npm run dev   ${pc.dim("# starts the Vite dev server")}`);
     } else if (sdkTarget === "reactnative") {
+      const isChatComponentRn = isReactNativeChatComponent(outputDir);
       p.log.message(`  1. cd ${pc.cyan(outputDir)} && npm install`);
-      p.log.message(`  2. npm start   ${pc.dim("# starts the Metro bundler")}`);
-      p.log.message(`  3. ${pc.cyan("npx react-native run-ios")} or ${pc.cyan("npx react-native run-android")}`);
+      if (isChatComponentRn) {
+        p.log.message(`  2. ${pc.cyan("npm run ios")} ${pc.dim("# or  npm run android")}`);
+        if (profile.testUsers && profile.testUsers.length > 0) {
+          p.log.message(`  3. On the Setup tab, form is pre-filled with ${pc.cyan(profile.testUsers[0].email)} — tap Test then Save`);
+        } else {
+          p.log.message(`  3. On the Setup tab, paste a user JWT (endpoints + app token are pre-filled) — tap Test then Save`);
+        }
+      } else {
+        p.log.message(`  2. ${pc.cyan("npm start")} ${pc.dim("# starts the Metro bundler")}`);
+        p.log.message(`  3. ${pc.cyan("npx react-native run-ios")} or ${pc.cyan("npx react-native run-android")}`);
+      }
     }
     p.log.message("");
   } catch (err: any) {

@@ -59,6 +59,7 @@ const APPCONFIG_PATH = join(
 );
 const SWIFT_SAMPLE_PROJECT_YML = "project.yml";
 const SWIFT_SAMPLE_SESSION_FILE = join("SDKPlayground", "PlaygroundSession.swift");
+const RN_TESTBED_FILE = "AppLoginChatsRn.tsx";
 
 export function isAndroidSample(outputDir: string): boolean {
   return existsSync(join(outputDir, SAMPLE_BUILD_GRADLE));
@@ -77,6 +78,13 @@ export function isSwiftSample(outputDir: string): boolean {
 /** ethora-sdk-swift (the SPM package root). */
 export function isSwiftSdk(outputDir: string): boolean {
   return existsSync(join(outputDir, "Package.swift"));
+}
+
+/** ethora-chat-component-rn (the React Native chat SDK + testbed). */
+export function isReactNativeChatComponent(outputDir: string): boolean {
+  return existsSync(join(outputDir, "package.json"))
+      && existsSync(join(outputDir, "app.json"))
+      && existsSync(join(outputDir, RN_TESTBED_FILE));
 }
 
 /** Detect SDK project by target type */
@@ -300,6 +308,66 @@ function patchSwiftSample(outputDir: string, profile: Profile): string[] {
   return patched;
 }
 
+/**
+ * Patch `ethora-chat-component-rn`'s testbed file in-place with profile
+ * values.
+ *
+ * The chat-component-rn testbed (`AppLoginChatsRn.tsx`) opens on a "Setup"
+ * tab with empty defaults so the developer types/pastes credentials at
+ * runtime. We populate that form by rewriting the `DEFAULT_CREDS` object
+ * literal so first launch lands with everything ready: endpoints, app
+ * token, and (if a test user was created) email + password in 'email'
+ * mode. Hit "Test connection" then "Save" and the Chat tab takes over.
+ *
+ * The rewrite is scoped to the `DEFAULT_CREDS` block so unrelated state
+ * variables with the same field names (e.g. the local `appToken`
+ * `useState`) are not touched.
+ */
+function patchReactNativeTestbed(outputDir: string, profile: Profile): string[] {
+  const patched: string[] = [];
+  const e = profile.endpoints;
+  const testUser = profile.testUsers?.[0];
+
+  const testbedFile = join(outputDir, RN_TESTBED_FILE);
+  if (!existsSync(testbedFile)) return patched;
+
+  let content = readFileSync(testbedFile, "utf-8");
+  const blockMatch = content.match(/const DEFAULT_CREDS:[^{]*\{[\s\S]*?\n\};/);
+  if (!blockMatch) return patched;
+
+  let block = blockMatch[0];
+
+  const replaceStringField = (name: string, value: string) => {
+    const pattern = new RegExp(`(${name}: )'[^']*'`);
+    block = block.replace(pattern, `$1'${value.replace(/'/g, "\\'")}'`);
+  };
+
+  replaceStringField("baseUrl", e.apiUrl);
+  replaceStringField("xmppHost", e.xmppHost);
+  replaceStringField("xmppDevServer", e.xmppHost);
+  replaceStringField("conference", e.xmppConference);
+  replaceStringField("appToken", profile.appToken);
+
+  if (testUser) {
+    replaceStringField("mode", "email");
+    replaceStringField("email", testUser.email);
+    replaceStringField("password", testUser.password);
+  } else if (testUser === undefined && profile.testUsers === undefined) {
+    // No test users at all — leave mode='jwt' so the developer can paste
+    // a JWT they have on hand.
+  }
+
+  content = content.replace(blockMatch[0], block);
+  writeFileSync(testbedFile, content);
+  patched.push(
+    testUser
+      ? `${RN_TESTBED_FILE} (DEFAULT_CREDS: endpoints + app token + ${testUser.email} email/password)`
+      : `${RN_TESTBED_FILE} (DEFAULT_CREDS: endpoints + app token)`
+  );
+
+  return patched;
+}
+
 function generateAndroidFallback(profile: Profile): GeneratedFile[] {
   const envFile = generateEnvFile(profile);
   return [
@@ -427,6 +495,13 @@ export function generateConfig(
     return patchReactConfig(outputDir, profile);
   }
 
+  // React Native: patch the chat-component-rn testbed if detected. For
+  // generic RN projects without that file, fall through to the
+  // `.env.ethora` writer below.
+  if (target === "reactnative" && isReactNativeChatComponent(outputDir)) {
+    return patchReactNativeTestbed(outputDir, profile);
+  }
+
   let files: GeneratedFile[];
 
   switch (target) {
@@ -516,6 +591,22 @@ export function showConfigPreview(profile: Profile, target: SdkTarget): string {
         `//   xmppConference    = ${e.xmppConference}`,
         userLine,
         `// If ethora-sdk-swift is cloned as a sibling, project.yml's EthoraSDK path will also be patched to resolve correctly.`,
+      ].join("\n");
+    }
+    case "reactnative": {
+      const testUser = profile.testUsers?.[0];
+      const userLine = testUser
+        ? `//   mode='email', email/password = ${testUser.email} / ${testUser.password}`
+        : `//   mode='jwt' (no test user — paste a JWT in the Setup tab)`;
+      return [
+        `// React Native (ethora-chat-component-rn): will patch AppLoginChatsRn.tsx's DEFAULT_CREDS so the testbed's Setup tab opens pre-filled with:`,
+        `//   baseUrl       = ${e.apiUrl}`,
+        `//   xmppHost      = ${e.xmppHost}`,
+        `//   xmppDevServer = ${e.xmppHost}`,
+        `//   conference    = ${e.xmppConference}`,
+        `//   appToken      = ${profile.appToken ? "<app JWT>" : "(empty)"}`,
+        userLine,
+        `// Other React Native projects: a generic .env.ethora is written at the repo root for you to wire into your own config loader.`,
       ].join("\n");
     }
     case "wordpress":

@@ -4,6 +4,12 @@ All notable changes to this package are documented here. For cross-SDK release n
 
 ---
 
+## [26.5.1]
+
+- **New:** React Native target now actually configures the [`ethora-chat-component-rn`](https://github.com/dappros/ethora-chat-component-rn) testbed. Previously the RN path wrote a `.env.ethora` file that nothing in the testbed read; the developer still had to type endpoints + app token + email + password into the in-app Setup tab before they could connect. `patchReactNativeTestbed()` now rewrites the `DEFAULT_CREDS` object literal in `AppLoginChatsRn.tsx` so first launch lands with everything pre-filled: `baseUrl`, `xmppHost`, `xmppDevServer`, `conference`, `appToken`, and (when a test user was created) `mode: 'email'` + email + password. Hit Test then Save and the Chat tab takes over.
+- **New:** `isReactNativeChatComponent()` detection helper. Distinguishes the chat-component-rn testbed (matches `package.json` + `app.json` + `AppLoginChatsRn.tsx`) from a generic React Native project (only the first two). Generic RN projects still receive the `.env.ethora` writer as before so developers can wire it into their own config loader.
+- **Improved:** Post-clone hints for the RN target now show `npm run ios` / `npm run android` (Expo-driven, matches the actual scripts in the chat-component-rn `package.json`) instead of the generic `npx react-native run-ios` command, and mention which credentials are pre-filled.
+
 ## [26.5.0]
 
 - **First npm release** — `@ethora/setup` is now published to npm; `npx @ethora/setup` works without a local clone.
