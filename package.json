@@ -1,6 +1,6 @@
 {
   "name": "@ethora/setup",
-  "version": "26.5.1",
+  "version": "26.5.2",
   "description": "Interactive CLI to set up Ethora SDK projects — register, create apps, configure credentials, and manage server profiles.",
   "type": "module",
   "bin": {
