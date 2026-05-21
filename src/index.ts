@@ -3,7 +3,7 @@
 import * as p from "@clack/prompts";
 import pc from "picocolors";
 import { execSync } from "node:child_process";
-import { existsSync, readFileSync, readdirSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { homedir, platform as osPlatform } from "node:os";
 import { join, resolve as resolvePath } from "node:path";
 import { EthoraAPI, SERVER_PRESETS, type ServerPreset, type ServerEndpoints, type AppInfo } from "./api.js";
@@ -1114,6 +1114,182 @@ async function ensureSwiftSdkSibling(sampleDir: string): Promise<boolean> {
 }
 
 /**
+ * Resolve the user's JDK location. Checks JAVA_HOME first, then falls
+ * back to Android Studio's bundled JBR on macOS (the recommended JDK
+ * per the chat-component-rn README), then any system JDK that
+ * `java -version` happens to find. Returns the JAVA_HOME path or null.
+ */
+function resolveJavaHome(): string | null {
+  const fromEnv = process.env.JAVA_HOME;
+  if (fromEnv && existsSync(join(fromEnv, "bin", "java"))) return fromEnv;
+
+  if (osPlatform() === "darwin") {
+    const jbr = "/Applications/Android Studio.app/Contents/jbr/Contents/Home";
+    if (existsSync(join(jbr, "bin", "java"))) return jbr;
+  }
+
+  // Last resort: ask the shell if a working java exists somewhere.
+  try {
+    execSync("java -version", { stdio: "pipe" });
+    return process.env.JAVA_HOME || ""; // env may still be unset; flag separately
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Append a block to the user's shell rc file if it isn't already
+ * there. Uses a marker comment so repeat runs are idempotent. Returns
+ * true if the file was modified.
+ */
+function appendShellRcIfMissing(rcPath: string, block: string, marker: string): boolean {
+  const content = existsSync(rcPath) ? readFileSync(rcPath, "utf-8") : "";
+  if (content.includes(marker)) return false;
+  const prefix = content.length > 0 && !content.endsWith("\n") ? "\n" : "";
+  writeFileSync(rcPath, content + prefix + "\n" + marker + "\n" + block + "\n");
+  return true;
+}
+
+/**
+ * Pre-flight check for the Android build environment. Runs when the
+ * developer picks `android` (Kotlin sample) or `reactnative` against
+ * chat-component-rn (which has an Android path too).
+ *
+ * Catches the three issues that bite first-time Android developers
+ * before they hit an opaque gradle error:
+ *
+ *   1. `JAVA_HOME` unset → gradle errors with "Unable to locate a Java
+ *      Runtime". When Android Studio's bundled JBR exists at the
+ *      standard macOS path, suggest it (matches the recommendation
+ *      in the chat-component-rn README).
+ *   2. `ANDROID_HOME` unset → adb / emulator / local.properties all
+ *      fail to resolve.
+ *   3. No emulator running → `expo run:android` errors with "No Android
+ *      connected device". List available AVDs and the launch command.
+ *
+ * Best-effort and non-fatal: prints warnings + the exact fix commands,
+ * then optionally appends the export lines to `~/.zshrc` (idempotently)
+ * if the user confirms. Continues even if the user declines.
+ */
+async function checkAndroidEnvironment(): Promise<void> {
+  const javaHome = resolveJavaHome();
+  const androidHome = resolveAndroidHome();
+
+  // Build the diagnosis. We collect lines first so we can detect
+  // "everything is fine, skip the section entirely".
+  const warnings: string[] = [];
+  const exportLines: string[] = [];
+
+  if (!javaHome) {
+    warnings.push(
+      `Java not found. Install Android Studio (recommended; ships JDK 17+) or a standalone JDK 17+.`
+    );
+  } else if (!process.env.JAVA_HOME) {
+    warnings.push(
+      `${pc.cyan("JAVA_HOME")} is not set in your shell. Gradle fails with "Unable to locate a Java Runtime" without it.`
+    );
+    exportLines.push(`export JAVA_HOME="${javaHome}"`);
+  }
+
+  if (!androidHome) {
+    warnings.push(
+      `Android SDK location not found. Set ${pc.cyan("ANDROID_HOME")} or install Android Studio.`
+    );
+  } else if (!process.env.ANDROID_HOME && !process.env.ANDROID_SDK_ROOT) {
+    warnings.push(
+      `${pc.cyan("ANDROID_HOME")} is not set in your shell. ${pc.cyan("adb")} / ${pc.cyan("emulator")} won't resolve on your PATH.`
+    );
+    exportLines.push(`export ANDROID_HOME="${androidHome}"`);
+    exportLines.push(`export PATH="$ANDROID_HOME/platform-tools:$ANDROID_HOME/emulator:$PATH"`);
+  }
+
+  // Emulator / AVD check (only meaningful if we have ANDROID_HOME)
+  let runningDevices = 0;
+  let avds: string[] = [];
+  if (androidHome) {
+    const adb = join(androidHome, "platform-tools", "adb");
+    if (existsSync(adb)) {
+      try {
+        const out = execSync(`${JSON.stringify(adb)} devices`, { stdio: "pipe" }).toString();
+        runningDevices = out
+          .split("\n")
+          .filter((l) => /\tdevice\b/.test(l))
+          .length;
+      } catch {
+        // adb errored — leave runningDevices at 0
+      }
+    }
+    const emulatorBin = join(androidHome, "emulator", "emulator");
+    if (existsSync(emulatorBin)) {
+      try {
+        const out = execSync(`${JSON.stringify(emulatorBin)} -list-avds`, { stdio: "pipe" }).toString();
+        avds = out.split("\n").map((s) => s.trim()).filter(Boolean);
+      } catch {
+        // emulator errored — leave avds empty
+      }
+    }
+  }
+
+  if (runningDevices === 0) {
+    if (avds.length > 0) {
+      warnings.push(
+        `No Android emulator running. ${pc.cyan(`expo run:android`)} needs a connected device or a booted AVD.`
+      );
+    } else if (androidHome) {
+      warnings.push(
+        `No AVDs configured. Open Android Studio → Device Manager → Create Device.`
+      );
+    }
+  }
+
+  if (warnings.length === 0) return; // nothing to flag
+
+  p.log.message("");
+  p.log.warn(pc.bold("Android environment check:"));
+  for (const w of warnings) {
+    p.log.message(`  - ${w}`);
+  }
+
+  if (exportLines.length > 0) {
+    p.log.message("");
+    p.log.message(pc.bold("Add to your shell config (~/.zshrc):"));
+    for (const e of exportLines) {
+      p.log.message(`  ${pc.cyan(e)}`);
+    }
+
+    const rcPath = join(homedir(), ".zshrc");
+    const confirm = await p.confirm({
+      message: `Append these lines to ${pc.cyan(rcPath)} for future shells?`,
+      initialValue: true,
+    });
+    if (!p.isCancel(confirm) && confirm) {
+      const block = exportLines.join("\n");
+      const written = appendShellRcIfMissing(
+        rcPath,
+        block,
+        "# Added by @ethora/setup (Android JDK + SDK)"
+      );
+      if (written) {
+        p.log.success(
+          `Appended to ${pc.cyan(rcPath)}. Open a new shell or run ${pc.cyan(`source ${rcPath}`)} to load them.`
+        );
+      } else {
+        p.log.info(`${pc.cyan(rcPath)} already has the @ethora/setup block — no change.`);
+      }
+    }
+  }
+
+  if (runningDevices === 0 && avds.length > 0 && androidHome) {
+    p.log.message("");
+    p.log.message(pc.bold("Start an emulator before running the build:"));
+    p.log.message(`  ${pc.cyan(`${androidHome}/emulator/emulator -avd ${avds[0]} &`)}`);
+    if (avds.length > 1) {
+      p.log.message(`  ${pc.dim(`(other AVDs: ${avds.slice(1).join(", ")})`)}`);
+    }
+  }
+}
+
+/**
  * Run `npm install` inside a freshly-cloned JS-based SDK sample so the
  * developer can go straight to `npm run ios` / `npm run dev` without
  * a missed step. Output is suppressed (npm install is noisy and clack
@@ -1319,6 +1495,18 @@ async function askGenerateConfig(profile: Profile) {
     // failure before the developer hits it in Android Studio.
     if (sdkTarget === "android") {
       checkAndroidPlatformSdkInstalled(resolvePath(outputDir));
+    }
+
+    // Environment-level Android pre-flight: JAVA_HOME / ANDROID_HOME /
+    // running emulator. Fires for the Kotlin sample AND for the RN
+    // chat-component-rn case, since the latter has an Android build path
+    // too. See checkAndroidEnvironment() comment for what each warning
+    // catches.
+    if (
+      sdkTarget === "android" ||
+      (sdkTarget === "reactnative" && isReactNativeChatComponent(outputDir))
+    ) {
+      await checkAndroidEnvironment();
     }
 
     // Post-setup summary
